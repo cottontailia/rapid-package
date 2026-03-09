@@ -166,6 +166,13 @@ Group 2 captures the package name.")
   "Regexp matching a `rapid-package-conf' declaration for imenu.
 Group 2 captures the category name.")
 
+(defconst rapid-package--imenu-after-regexp
+  (concat "^\\s-*("
+          (regexp-opt '("rapid-package-after") t)
+          "\\s-+" rapid-package--imenu-sym-regexp)
+  "Regexp matching a `rapid-package-after' declaration for imenu.
+Group 2 captures the package name.")
+
 (defconst rapid-package--imenu-package-entry
   (list "Packages" rapid-package--imenu-package-regexp 2)
   "Imenu entry for `rapid-package' declarations.")
@@ -174,13 +181,18 @@ Group 2 captures the category name.")
   (list "Conf" rapid-package--imenu-conf-regexp 2)
   "Imenu entry for `rapid-package-conf' declarations.")
 
+(defconst rapid-package--imenu-after-entry
+  (list "After" rapid-package--imenu-after-regexp 2)
+  "Imenu entry for `rapid-package-after' declarations.")
+
 (defcustom rapid-package-enable-imenu-support nil
-  "If non-nil, add `rapid-package' and `rapid-package-conf' to imenu.
+  "If non-nil, add rapid-package macros to imenu.
 
 When enabled, `imenu' (and imenu-based tools such as consult-imenu,
-helm-imenu, or counsel-imenu) will list `rapid-package' declarations
-under the \"Packages\" category and `rapid-package-conf' declarations
-under the \"Conf\" category when visiting an Emacs Lisp file.
+helm-imenu, or counsel-imenu) will list the following declarations:
+- `rapid-package' under \"Packages\"
+- `rapid-package-conf' under \"Conf\"
+- `rapid-package-after' under \"After\"
 
 This works by adding entries to `lisp-imenu-generic-expression', which
 is consulted by `emacs-lisp-mode' when building the imenu index.
@@ -202,23 +214,28 @@ Alternatively, use Customize to toggle it and then restart Emacs."
                   (add-to-list 'lisp-imenu-generic-expression
                                ',rapid-package--imenu-package-entry)
                   (add-to-list 'lisp-imenu-generic-expression
-                               ',rapid-package--imenu-conf-entry))
+                               ',rapid-package--imenu-conf-entry)
+                  (add-to-list 'lisp-imenu-generic-expression
+                               ',rapid-package--imenu-after-entry))
              `(progn
                 (setq lisp-imenu-generic-expression
                       (delete ',rapid-package--imenu-package-entry
                               lisp-imenu-generic-expression))
                 (setq lisp-imenu-generic-expression
                       (delete ',rapid-package--imenu-conf-entry
+                              lisp-imenu-generic-expression))
+                (setq lisp-imenu-generic-expression
+                      (delete ',rapid-package--imenu-after-entry
                               lisp-imenu-generic-expression)))))
          (set-default sym value)))
 
 ;;; font-lock
 
 (defconst rapid-package--font-lock-keywords
-  '(("(\\(rapid-package\\(?:-conf\\)?\\)\\_>[ \t']*\\(\\(?:\\sw\\|\\s_\\)+\\)?"
+  '(("(\\(rapid-package\\(?:-conf\\|-after\\)?\\)\\_>[ \t']*\\(\\(?:\\sw\\|\\s_\\)+\\)?"
      (1 font-lock-keyword-face)
      (2 font-lock-constant-face nil t)))
-  "Font-lock rules to highlight `rapid-package' and `rapid-package-conf'.")
+  "Font-lock rules to highlight rapid-package macros.")
 
 (font-lock-add-keywords 'emacs-lisp-mode rapid-package--font-lock-keywords)
 
