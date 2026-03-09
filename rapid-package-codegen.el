@@ -441,7 +441,7 @@ Auto-defers when :hook, :bind, :mode, :magic, :interpreter, or
 
     (let* ((buckets (rapid-package--codegen-bucket-new
                      '(:preface :pin :install :init :trigger
-                                :bind-global :config-pre :config-post)))
+                                :config-pre :config-post)))
            (bucket-order '(:preface :pin :install :init :trigger)))
 
       ;; :load-path (prepend to preface so load-path is set before ensure/require)
@@ -642,7 +642,7 @@ Condition wrapping is handled by the caller (`rapid-package--expand-conf')."
         (env-pairs              (plist-get p :env))
         (env-path-entries       (plist-get p :env-path)))
 
-    (let* ((buckets      (rapid-package--codegen-bucket-new '(:init :body :register)))
+    (let* ((buckets      (rapid-package--codegen-bucket-new '(:init :body)))
            (bucket-order '(:init :body)))
 
       ;; :init bucket

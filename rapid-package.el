@@ -19,7 +19,6 @@
 ;; - Clean DSL for package configuration (use-package compatible)
 ;; - Automatic byte-compilation with caching
 ;; - JSON export/import for portability
-;; - Registry-based configuration tracking
 ;; - Hybrid timestamp+hash cache validation
 ;; - Modern Emacs 29+ keymap APIs (keymap-set, keymap-global-set)
 ;;
@@ -63,7 +62,6 @@
 ;;     :hook (git-commit-mode . my-git-commit-setup))
 ;;
 ;;   (rapid-package-load "my-config.el")
-;;   (rapid-package-export "my-config.json")
 
 ;;; Code:
 
@@ -115,7 +113,6 @@ human-readable representation of the same configuration.
 
 Possible values:
   nil      Never write JSON automatically (default).
-           Use `rapid-package-export' to generate it explicitly.
   t        Write JSON whenever the .el file is recompiled (i.e. on change).
   always   Write JSON on every load regardless of compile state.
            **Performance note**: This requires re-parsing the source file
@@ -124,26 +121,10 @@ Possible values:
 
 The written .json is a first-class configuration file: it can be passed
 directly to `rapid-package-load' and round-trips losslessly for
-rapid-package, rapid-package-conf, and rapid-package-after macros.
-
-Note: `rapid-package-export' always writes regardless of this setting."
+rapid-package, rapid-package-conf, and rapid-package-after macros."
   :type '(choice (const :tag "Never (manual only)"   nil)
                  (const :tag "On change (recompile)" t)
                  (const :tag "Always (debug/CI)"     always))
-  :group 'rapid-package)
-
-(defcustom rapid-package-track-config nil
-  "If non-nil, register each package/conf in the global registry after eval.
-
-The registry enables `rapid-package-export', `rapid-package-describe-package',
-`rapid-package-show-registry', `rapid-package-stats', and similar commands.
-
-Set to t to enable registration.  This adds a small overhead after each
-macro expansion and retains all parsed plists in memory for the session.
-
-Add the following to your init file before loading packages:
-  (setq rapid-package-track-config t)"
-  :type 'boolean
   :group 'rapid-package)
 
 ;;; imenu support
@@ -267,17 +248,6 @@ its arguments."
     (display-warning 'rapid-package body :error)
     (user-error "[rapid-package] %s" body)))
 
-;;; Registry (for export functionality)
-
-(defvar rapid-package--registry nil
-  "Registry of all rapid-package and rapid-package-conf declarations.
-
-An ordered list of entries in declaration order, each a plist:
-  (:type TYPE :name NAME :parsed PLIST)
-
-TYPE is \\='package or \\='config.
-Re-registering an existing (TYPE, NAME) pair replaces it in-place so
-the original declaration position is preserved.")
 
 (defvar rapid-package--expansion-phase nil
   "Non-nil while `rapid-package--expand-file' is processing a .el file.
@@ -404,9 +374,9 @@ Each entry: (:keyword KW :for FOR :position POS :expander FN)
 Processed during macro expansion; FN returns a list of forms.")
 
 ;; Valid positions in body (package macro):
-;;   :preface :pin :install :init :trigger :config-pre :config-post :register
+;;   :preface :pin :install :init :trigger :config-pre :config-post
 ;; Valid positions in body (conf macro):
-;;   :init :body :register
+;;   :init :body
 ;; Position spec: SYMBOL or (:before SYMBOL) or (:after SYMBOL)
 
 (defun rapid-package--apply-rewriters (plist name for)
@@ -517,8 +487,8 @@ In that case, call this function twice: once for \\='package and once for
 \\='conf, with appropriate positions for each.
 
 Valid bucket names for rapid-package:
-  :preface :pin :install :init :trigger :config-pre :config-post :register
-Valid bucket names for rapid-package-conf: :init :body :register
+  :preface :pin :install :init :trigger :config-pre :config-post
+Valid bucket names for rapid-package-conf: :init :body
 
 Example:
     :position \\='(:before :install)
@@ -694,39 +664,6 @@ Returns nil if :disabled is set, combined condition form, or t if no conditions.
        (t `(and ,@(nreverse conditions))))))))
 
 
-;;; Registry Management
-
-(defun rapid-package--require-tracking (caller)
-  "Signal a user-error if `rapid-package-track-config' is nil.
-CALLER is a string naming the function that requires the registry,
-used in the error message."
-  (unless rapid-package-track-config
-    (user-error
-     "[rapid-package] %s requires the registry, but `rapid-package-track-config' is nil.\n\
-To enable it, add the following to your init file before loading packages:\n\
-  (setq rapid-package-track-config t)"
-     caller)))
-
-(defun rapid-package--register (type name parsed-config)
-  "Append a TYPE/NAME entry to `rapid-package--registry'.
-
-TYPE is \\='package or \\='config.
-NAME is the package/category name (symbol).
-PARSED-CONFIG is the parsed plist from the DSL parser.
-
-Duplicate (TYPE, NAME, PARSED-CONFIG) entries are allowed and
-preserved in declaration order."
-  (setq rapid-package--registry
-        (nconc rapid-package--registry
-               (list (list :type type :name name :parsed parsed-config)))))
-
-;;;###autoload
-(defun rapid-package-clear-registry ()
-  "Clear all registered configurations."
-  (interactive)
-  (setq rapid-package--registry nil)
-  (rapid-package--message 'registry "Registry cleared"))
-
 ;;; Main Macros
 
 (defmacro rapid-package (package &rest args)
@@ -828,11 +765,8 @@ Example:
   "Return the expansion form for PKG-NAME from parsed plist P.
 Wraps in (when CONDITION ...) unless CONDITION is t."
   (let* ((body (rapid-package--codegen-package
-                pkg-name docstring rapid-package--expanders p))
-         (register `(when rapid-package-track-config
-                      (rapid-package--register 'package ',pkg-name ',p)))
-         (form `(progn ,body ,register)))
-    (if (eq condition t) form `(when ,condition ,form))))
+                pkg-name docstring rapid-package--expanders p)))
+    (if (eq condition t) body `(when ,condition ,body))))
 
 (defmacro rapid-package-conf (category &rest args)
   "Configure Emacs settings by CATEGORY.
@@ -915,11 +849,8 @@ Example:
 Wraps in (when CONDITION ...) unless CONDITION is t."
   (let* ((body (rapid-package--codegen-conf
                 cat docstring
-                rapid-package--expanders p))
-         (register `(when rapid-package-track-config
-                      (rapid-package--register 'config ',cat ',p)))
-         (form `(progn ,body ,register)))
-    (if (eq condition t) form `(when ,condition ,form))))
+                rapid-package--expanders p)))
+    (if (eq condition t) body `(when ,condition ,body))))
 
 ;;; rapid-package-after macro
 
@@ -1538,7 +1469,7 @@ Returns a list of (:type TYPE :data PARSED-PLIST) entries."
         (end-of-file nil)))
     (rapid-package--tl-value packages)))
 
-;;; JSON Export Helpers
+;;; JSON Conversion Helpers
 
 (defun rapid-package-json--get-field-type (key)
   "Get the type of field KEY from schema.
@@ -1773,8 +1704,6 @@ Values in :value and :default slots are converted with
       (setq tail (cddr tail)))
     obj))
 
-;;; JSON Export
-
 (defun rapid-package--export-metadata ()
   "Return a metadata hash table for JSON export (timestamp, Emacs version, etc.)."
   (let ((meta (make-hash-table :test 'equal)))
@@ -1889,40 +1818,6 @@ PACKAGES-DATA is a list of (:type TYPE :data PARSED-PLIST) entries."
       (let ((json-encoding-pretty-print t))
         (insert (json-encode json-data))))))
 
-;;;###autoload
-(defun rapid-package-export (file)
-  "Export all registered configurations to JSON FILE in items format.
-
-Reads from `rapid-package--registry' in declaration order.
-Always writes to FILE regardless of `rapid-package-json-auto-write'.
-
-Requires `rapid-package-track-config' to be non-nil; signals a
-`user-error' otherwise."
-  (interactive "FSave configuration to: ")
-  (rapid-package--require-tracking "rapid-package-export")
-  (let ((json-data (make-hash-table :test 'equal))
-        (items (rapid-package--tl-new))
-        (n-packages 0)
-        (n-configs   0))
-    (dolist (entry rapid-package--registry)
-      (let* ((type    (plist-get entry :type))
-             (parsed  (plist-get entry :parsed))
-             (json-obj (rapid-package--to-json parsed type)))
-        (puthash "type" (if (eq type 'package) "package" "config") json-obj)
-        (rapid-package--tl-append! items json-obj)
-        (if (eq type 'package)
-            (setq n-packages (1+ n-packages))
-          (setq n-configs (1+ n-configs)))))
-    (puthash "items" (vconcat (rapid-package--tl-value items)) json-data)
-    (puthash "metadata" (rapid-package--export-metadata) json-data)
-    (with-temp-file file
-      (let ((json-encoding-pretty-print t))
-        (insert (json-encode json-data))))
-    (rapid-package--message 'export "Exported %d packages and %d configs to %s"
-                            n-packages n-configs file)))
-
-;;; JSON Import
-
 (defun rapid-package-json--denormalize-field (key json-val)
   "Reverse field-json-value for field KEY.
 Uses schema-based type detection."
@@ -1950,7 +1845,6 @@ Uses schema-based type detection."
                 (append json-val nil)))
        (t (rapid-package-json--denormalize-lisp-value json-val))))
      (t (rapid-package-json--denormalize-lisp-value json-val)))))
-
 
 (defun rapid-package-json--denormalize-ir-slot (val)
   "Denormalize an IR-level slot value VAL (not a Lisp value slot).
@@ -2065,154 +1959,7 @@ Returns a hash table with the parsed JSON data."
           (json-null :json-null))
       (json-read))))
 
-(defun rapid-package--register-from-json (json-data)
-  "Register packages and configs from JSON-DATA into `rapid-package--registry'."
-  (let ((items (gethash "items" json-data)))
-    (when items
-      (dotimes (i (length items))
-        (let* ((item (aref items i))
-               (type (gethash "type" item)))
-          (pcase type
-            ("package"
-             (let ((name-str (gethash "package" item)))
-               (unless (stringp name-str)
-                 (rapid-package--abort 'json "Item %d: missing or invalid 'package' field (got %S)"
-                                       i name-str))
-               (let* ((name   (intern name-str))
-                      (parsed (rapid-package--json-to-parsed item 'package)))
-                 (rapid-package--register 'package name parsed))))
-            ("config"
-             (let ((name-str (gethash "category" item)))
-               (unless (stringp name-str)
-                 (rapid-package--abort 'json "Item %d: missing or invalid 'category' field (got %S)"
-                                       i name-str))
-               (let* ((name   (intern name-str))
-                      (parsed (rapid-package--json-to-parsed item 'config)))
-                 (rapid-package--register 'config name parsed))))
-            (_ (rapid-package--warning 'json
-                                       "Unknown item type at index %d: %s" i type))))))))
-;;;###autoload
-(defun rapid-package-import (file)
-  "Import configurations from JSON FILE.
-Appends them to `rapid-package--registry'.
-
-Requires `rapid-package-track-config' to be non-nil; signals a
-`user-error' otherwise."
-  (interactive "fLoad configuration from JSON: ")
-  (rapid-package--require-tracking "rapid-package-import")
-  (let ((json-data (rapid-package--read-json file)))
-    (rapid-package--register-from-json json-data)
-    (rapid-package--message 'import "Imported from %s" file)))
-
-;;; User Commands (Registry Inspection, Statistics)
-
-;;;###autoload
-(defun rapid-package-show-registry ()
-  "Show all registered configurations in declaration order.
-
-Requires `rapid-package-track-config' to be non-nil; signals a
-`user-error' otherwise."
-  (interactive)
-  (rapid-package--require-tracking "rapid-package-show-registry")
-  (let ((buf (get-buffer-create "*rapid-package-registry*")))
-    (with-current-buffer buf
-      (let* ((inhibit-read-only t)
-             (n-packages (cl-count 'package rapid-package--registry
-                                   :key (lambda (e) (plist-get e :type))))
-             (n-configs  (- (length rapid-package--registry) n-packages)))
-        (erase-buffer)
-        (insert "# Rapid Package Registry\n\n")
-        (insert (format "Total packages: %d\n" n-packages))
-        (insert (format "Total configs: %d\n\n" n-configs))
-        (dolist (entry rapid-package--registry)
-          (let* ((type   (plist-get entry :type))
-                 (name   (plist-get entry :name))
-                 (parsed (plist-get entry :parsed))
-                 (desc   (cadr (plist-get parsed :_head))))
-            (insert (format "## [%s] %s\n" type name))
-            (when desc
-              (insert (format "    %s\n" desc)))
-            (insert "```elisp\n")
-            (pp parsed (current-buffer))
-            (insert "```\n\n")))
-        (goto-char (point-min))
-        (when (fboundp 'markdown-mode)
-          (markdown-mode))
-        (view-mode 1)))
-    (display-buffer buf)))
-
-;;;###autoload
-(defun rapid-package-describe-package (name)
-  "Show all registry entries for NAME in declaration order.
-Searches both package and config entries; shows every occurrence.
-
-Requires `rapid-package-track-config' to be non-nil; signals a
-`user-error' otherwise."
-  (interactive
-   (progn
-     (rapid-package--require-tracking "rapid-package-describe-package")
-     (list (intern (completing-read
-                    "Name: "
-                    (delete-dups
-                     (mapcar (lambda (e) (symbol-name (plist-get e :name)))
-                             rapid-package--registry))
-                    nil t)))))
-  (let ((entries (cl-remove-if-not (lambda (e) (eq (plist-get e :name) name))
-                                   rapid-package--registry)))
-    (if (not entries)
-        (rapid-package--message 'registry "%s not found in registry" name)
-      (let ((buf (get-buffer-create (format "*rapid-package: %s*" name))))
-        (with-current-buffer buf
-          (let ((inhibit-read-only t))
-            (erase-buffer)
-            (insert (format "# %s (%d occurrence%s)\n\n"
-                            name (length entries)
-                            (if (= (length entries) 1) "" "s")))
-            (let ((idx 1))
-              (dolist (entry entries)
-                (let* ((type   (plist-get entry :type))
-                       (parsed (plist-get entry :parsed))
-                       (desc   (cadr (plist-get parsed :_head))))
-                  (insert (format "## [%d] %s: %s\n\n"
-                                  idx (if (eq type 'package) "package" "conf") name))
-                  (when desc
-                    (insert (format "**Description:** %s\n\n" desc)))
-                  (insert "```elisp\n")
-                  (pp parsed (current-buffer))
-                  (insert "```\n\n")
-                  (setq idx (1+ idx)))))
-            (goto-char (point-min))
-            (when (fboundp 'markdown-mode)
-              (markdown-mode))
-            (view-mode 1)))
-        (display-buffer buf)))))
-
-;;;###autoload
-(defun rapid-package-stats ()
-  "Show statistics about registered configurations.
-
-Requires `rapid-package-track-config' to be non-nil; signals a
-`user-error' otherwise."
-  (interactive)
-  (rapid-package--require-tracking "rapid-package-stats")
-  (let ((n-packages 0) (n-configs   0)
-        (with-ensure 0) (with-defer  0)
-        (with-hooks  0) (with-bindings 0))
-    (dolist (entry rapid-package--registry)
-      (let* ((type   (plist-get entry :type))
-             (parsed (plist-get entry :parsed)))
-        (if (eq type 'package)
-            (progn
-              (setq n-packages (1+ n-packages))
-              (when (plist-get parsed :ensure)  (setq with-ensure   (1+ with-ensure)))
-              (when (plist-get parsed :defer)   (setq with-defer    (1+ with-defer)))
-              (when (plist-get parsed :hook)    (setq with-hooks    (1+ with-hooks)))
-              (when (plist-get parsed :bind)    (setq with-bindings (1+ with-bindings))))
-          (setq n-configs (1+ n-configs)))))
-    (rapid-package--message 'stats
-                            "Packages: %d | Configs: %d | Ensure: %d | Defer: %d | Hooks: %d | Bindings: %d"
-                            n-packages n-configs
-                            with-ensure with-defer with-hooks with-bindings)))
+;;; User Commands (Cache Management)
 
 ;;;###autoload
 (defun rapid-package-cache-status ()
