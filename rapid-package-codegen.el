@@ -405,7 +405,7 @@ Auto-defers when :hook, :bind, :mode, :magic, :interpreter, or
 
 ;;; Package codegen
 
-(defun rapid-package--codegen-package (pkg-name docstring expanders p)
+(defun rapid-package--codegen-package (pkg-name expanders p)
   "Return the expansion form for PKG-NAME given parsed plist P."
   (let* ((ensure-p  (rapid-package--codegen-ensure-p p))
          (demand-p  (rapid-package--codegen-demand-p p))
@@ -450,9 +450,6 @@ Auto-defers when :hook, :bind, :mode, :magic, :interpreter, or
          buckets :preface `(add-to-list 'load-path ,dir)))
 
       ;; :preface
-      (when docstring
-        (rapid-package--codegen-bucket-append!
-         buckets :preface `(put ',pkg-name 'package-description ,docstring)))
       (when preface-body
         (rapid-package--codegen-bucket-extend! buckets :preface preface-body))
       (when env-path-entries
@@ -614,9 +611,8 @@ Auto-defers when :hook, :bind, :mode, :magic, :interpreter, or
 
 ;;; Conf codegen
 
-(defun rapid-package--codegen-conf (cat docstring expanders p)
+(defun rapid-package--codegen-conf (cat expanders p)
   "Return the body form for conf category CAT.
-DOCSTRING is an optional string stored as a property on CAT, or nil.
 EXPANDERS is the current `rapid-package--expanders' alist.
 P is the normalized plist from `rapid-package-dsl-parse'.
 
@@ -646,10 +642,6 @@ Condition wrapping is handled by the caller (`rapid-package--expand-conf')."
            (bucket-order '(:init :body)))
 
       ;; :init bucket
-      (when docstring
-        (rapid-package--codegen-bucket-prepend-extend!
-         buckets :init `((put ',cat 'config-description ,docstring))))
-      ;; :load-path
       (dolist (dir load-path-dirs)
         (rapid-package--codegen-bucket-append!
          buckets :init `(add-to-list 'load-path ,dir)))

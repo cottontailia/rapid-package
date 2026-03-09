@@ -753,19 +753,18 @@ Example:
                                      package (error-message-string err)))))
          (head-parsed (rapid-package--parse-head (plist-get p :_head)))
          (pkg-name  (car head-parsed))
-         (docstring  (cdr head-parsed))
          (condition  (rapid-package--check-condition p)))
 
     ;; Apply registered rewriters (modifies p before body expansion)
     (setq p (rapid-package--apply-rewriters p pkg-name 'package))
 
-    (rapid-package--expand-package pkg-name docstring condition p)))
+    (rapid-package--expand-package pkg-name condition p)))
 
-(defun rapid-package--expand-package (pkg-name docstring condition p)
+(defun rapid-package--expand-package (pkg-name condition p)
   "Return the expansion form for PKG-NAME from parsed plist P.
 Wraps in (when CONDITION ...) unless CONDITION is t."
   (let* ((body (rapid-package--codegen-package
-                pkg-name docstring rapid-package--expanders p)))
+                pkg-name rapid-package--expanders p)))
     (if (eq condition t) body `(when ,condition ,body))))
 
 (defmacro rapid-package-conf (category &rest args)
@@ -836,20 +835,17 @@ Example:
                                      category (error-message-string err)))))
          (head-parsed (rapid-package--parse-head (plist-get p :_head)))
          (cat      (car head-parsed))
-         (docstring (cdr head-parsed))
          (condition (rapid-package--check-condition p)))
 
     ;; Apply registered rewriters
     (setq p (rapid-package--apply-rewriters p cat 'conf))
 
-    (rapid-package--expand-conf cat docstring condition p)))
+    (rapid-package--expand-conf cat condition p)))
 
-(defun rapid-package--expand-conf (cat docstring condition p)
+(defun rapid-package--expand-conf (cat condition p)
   "Return the expansion form for conf category CAT from parsed plist P.
 Wraps in (when CONDITION ...) unless CONDITION is t."
-  (let* ((body (rapid-package--codegen-conf
-                cat docstring
-                rapid-package--expanders p)))
+  (let* ((body (rapid-package--codegen-conf cat rapid-package--expanders p)))
     (if (eq condition t) body `(when ,condition ,body))))
 
 ;;; rapid-package-after macro
@@ -1195,7 +1191,7 @@ Returns the list of expanded forms (for writing to .elc cache)."
            (let* ((plist     (rapid-package--json-to-parsed item 'package))
                   (head      (plist-get plist :_head))
                   (form      (rapid-package--expand-package
-                              (car head) (cadr head)
+                              (car head)
                               (rapid-package--check-condition plist)
                               plist)))
              (eval form t)
@@ -1205,7 +1201,7 @@ Returns the list of expanded forms (for writing to .elc cache)."
            (let* ((plist     (rapid-package--json-to-parsed item 'config))
                   (head      (plist-get plist :_head))
                   (form      (rapid-package--expand-conf
-                              (car head) (cadr head)
+                              (car head)
                               (rapid-package--check-condition plist)
                               plist)))
              (eval form t)
