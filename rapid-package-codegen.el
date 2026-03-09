@@ -491,7 +491,7 @@ Auto-defers when :hook, :bind, :mode, :magic, :interpreter, or
       (when require-features
         (dolist (feature require-features)
           (rapid-package--codegen-bucket-append!
-           buckets :init `(require ',feature))))
+           buckets :config-pre `(require ',feature))))
 
       ;; :trigger - autoloads, :mode, :magic, :interpreter
       (let ((tl (rapid-package--tl-new)))
