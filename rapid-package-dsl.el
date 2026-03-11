@@ -378,14 +378,14 @@ the head list for other accumulators."
   "Quote VAL for macro expansion with unquote support.
 
 Rules:
-  (\\, X)        -> X
+  (\\, X)        -> (\\, X)  unchanged; codegen strips \\, at emit time
   (quote X)     -> unchanged
   (function X)  -> unchanged  (#\\='X passes through as-is)
   self-evaluating -> unchanged
   otherwise     -> (quote VAL)"
   (cond
-   ;; Unquote: ,value -> evaluate it
-   ((and (consp val) (eq (car val) '\,)) (cadr val))
+   ;; Unquote: keep (\, EXPR) as-is so JSON round-trip can preserve it
+   ((and (consp val) (eq (car val) '\,)) val)
    ;; Already quoted
    ((and (listp val) (eq (car val) 'quote)) val)
    ;; Function reference: #'foo -> (function foo) -> pass through

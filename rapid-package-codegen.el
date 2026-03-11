@@ -19,6 +19,16 @@
 (require 'cl-lib)
 (require 'rapid-package-tl)
 
+;;; Unquote helper
+
+(defun rapid-package--codegen-unquote (val)
+  "Unwrap (\\, EXPR) to EXPR for code emission; return other values unchanged.
+DSL unquote forms are preserved in the IR so JSON round-trip works correctly.
+This function strips the marker at the final codegen step."
+  (if (and (consp val) (eq (car val) '\,))
+      (cadr val)
+    val))
+
 ;;; Position helpers
 
 (defun rapid-package--codegen-position-key (position)
@@ -166,7 +176,8 @@ so the output uses #\\=' for proper compile-time function resolution."
   (when customs
     (mapcar (lambda (entry)
               `(customize-set-variable ',(plist-get entry :variable)
-                                       ,(plist-get entry :value)))
+                                       ,(rapid-package--codegen-unquote
+                                         (plist-get entry :value))))
             customs)))
 
 (defun rapid-package--codegen-custom-face-forms (faces)
@@ -180,10 +191,11 @@ rather than the incorrect double-quoted:
     (mapcar (lambda (entry)
               (let* ((face  (plist-get entry :variable))
                      (qval  (plist-get entry :value))
-                     ;; qval is (quote SPEC); unwrap to get the raw SPEC
-                     (spec  (if (and (consp qval) (eq (car qval) 'quote))
-                                (cadr qval)
-                              qval)))
+                     ;; qval is (quote SPEC) or (\, EXPR); unwrap to get raw SPEC/EXPR
+                     (spec  (cond
+                             ((and (consp qval) (eq (car qval) 'quote)) (cadr qval))
+                             ((and (consp qval) (eq (car qval) '\,))    (cadr qval))
+                             (t qval))))
                 `(custom-set-faces '(,face ,spec))))
             faces)))
 
@@ -203,7 +215,7 @@ nil value causes setenv to unset the variable."
   (when pairs
     (mapcar (lambda (entry)
               `(setenv ,(plist-get entry :variable)
-                       ,(plist-get entry :value)))
+                       ,(rapid-package--codegen-unquote (plist-get entry :value))))
             pairs)))
 
 (defun rapid-package--codegen-env-path-forms (entries)
@@ -214,7 +226,7 @@ PATH entries also sync `exec-path'."
     (mapcar
      (lambda (e)
        (let* ((var    (plist-get e :var))
-              (dir    (plist-get e :dir))
+              (dir    (rapid-package--codegen-unquote (plist-get e :dir)))
               (op     (plist-get e :op))
               (path-p (equal var "PATH")))
          (pcase op
@@ -240,7 +252,7 @@ PATH entries also sync `exec-path'."
   (when pairs
     (mapcar (lambda (entry)
               (let ((var (plist-get entry :variable))
-                    (val (plist-get entry :value)))
+                    (val (rapid-package--codegen-unquote (plist-get entry :value))))
                 (if use-default `(setq-default ,var ,val) `(setq ,var ,val))))
             pairs)))
 
@@ -352,7 +364,8 @@ Kind, hook, and map are computed from :target at codegen time.
               (dolist (entry locals)
                 (rapid-package--tl-append! body-tl
                                            `(setq-local ,(plist-get entry :variable)
-                                                        ,(plist-get entry :value))))
+                                                        ,(rapid-package--codegen-unquote
+                                                          (plist-get entry :value)))))
               (dolist (fn hooks)
                 (rapid-package--tl-append! body-tl `(,fn)))
               (dolist (pair binds)

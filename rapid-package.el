@@ -577,6 +577,13 @@ Returns a cons cell (NAME . DOCSTRING) where DOCSTRING may be nil."
    (t
     (rapid-package--abort 'parse "Too many arguments before keywords: %S" head-list))))
 
+(defun rapid-package--unquote-expr (val)
+  "Unwrap (\\, EXPR) to EXPR; return other values unchanged.
+Used to resolve unquote markers in IR values at codegen time."
+  (if (and (consp val) (eq (car val) '\,))
+      (cadr val)
+    val))
+
 (defun rapid-package--check-condition (plist)
   "Extract conditional expression from PLIST.
 
@@ -614,42 +621,42 @@ Returns nil if :disabled is set, combined condition form, or t if no conditions.
       (when-let ((pairs (plist-get plist :when-ge)))
         (dolist (pair pairs)
           (let ((var (plist-get pair :variable))
-                (val (plist-get pair :value)))
+                (val (rapid-package--unquote-expr (plist-get pair :value))))
             (push `(>= ,var ,val) conditions))))
-      
+
       ;; :when-gt - > comparisons
       (when-let ((pairs (plist-get plist :when-gt)))
         (dolist (pair pairs)
           (let ((var (plist-get pair :variable))
-                (val (plist-get pair :value)))
+                (val (rapid-package--unquote-expr (plist-get pair :value))))
             (push `(> ,var ,val) conditions))))
-      
+
       ;; :when-le - <= comparisons
       (when-let ((pairs (plist-get plist :when-le)))
         (dolist (pair pairs)
           (let ((var (plist-get pair :variable))
-                (val (plist-get pair :value)))
+                (val (rapid-package--unquote-expr (plist-get pair :value))))
             (push `(<= ,var ,val) conditions))))
-      
+
       ;; :when-lt - < comparisons
       (when-let ((pairs (plist-get plist :when-lt)))
         (dolist (pair pairs)
           (let ((var (plist-get pair :variable))
-                (val (plist-get pair :value)))
+                (val (rapid-package--unquote-expr (plist-get pair :value))))
             (push `(< ,var ,val) conditions))))
-      
+
       ;; :when-eq - = comparisons
       (when-let ((pairs (plist-get plist :when-eq)))
         (dolist (pair pairs)
           (let ((var (plist-get pair :variable))
-                (val (plist-get pair :value)))
+                (val (rapid-package--unquote-expr (plist-get pair :value))))
             (push `(= ,var ,val) conditions))))
-      
+
       ;; :when-ne - /= comparisons
       (when-let ((pairs (plist-get plist :when-ne)))
         (dolist (pair pairs)
           (let ((var (plist-get pair :variable))
-                (val (plist-get pair :value)))
+                (val (rapid-package--unquote-expr (plist-get pair :value))))
             (push `(/= ,var ,val) conditions))))
       
       ;; :when-p - predicate checks
@@ -1540,6 +1547,7 @@ Mapping:
   keyword          -> \":keyword\" (: prefix)
   symbol           -> \"\\='symbol\" (\\=' prefix)
   (function X)     -> \"#\\='X\" (function quote)
+  (\\, EXPR)       -> \",EXPR\" (unquote prefix)
   list/cons        -> \"(...)\" (prin1-to-string)
 
 Strings starting with identifier prefixes (#, \\=', :, (, `, \", \\) are
@@ -1562,10 +1570,14 @@ recognizing prefixes."
           (concat "\\" v)
         v))
      
+     ;; Unquote: (\, EXPR) -> ",EXPR"
+     ((and (consp v) (eq (car v) '\,))
+      (format ",%s" (prin1-to-string (cadr v))))
+
      ;; Function quote: #'func
      ((and (consp v) (eq (car v) 'function))
       (format "#'%s" (cadr v)))
-     
+
      ;; Keyword: :foo
      ((keywordp v)
       (symbol-name v))
@@ -1591,6 +1603,7 @@ Recognizes prefixes and escapes:
   \"#\\='X\"         -> (function X)
   \"\\='X\"          -> X (symbol)
   \":X\"             -> :X (keyword)
+  \",EXPR\"          -> (\\, EXPR) (unquote)
   \"(...)\"          -> read (list/cons)
   \"[...]\"          -> read (vector)
   \"?X\"             -> read (character)
@@ -1618,6 +1631,12 @@ Recognizes prefixes and escapes:
      ((string-prefix-p ":" value)
       (intern value))
      
+     ;; Unquote: ",EXPR" -> (\, EXPR)
+     ((string-prefix-p "," value)
+      (list '\, (condition-case nil
+                    (read (substring value 1))
+                  (error (substring value 1)))))
+
      ;; S-expression: (...) or [...] or ?char
      ((string-match-p "^[(\[?]" value)
       (condition-case nil
@@ -1654,6 +1673,9 @@ Body form list ((add-to-list ...) ...)    -> array of prin1 strings.
 Anything else                             -> delegate to
   `rapid-package-json--normalize-lisp-value'."
   (cond
+   ;; Unquote: (\, EXPR) -> delegate to normalize-lisp-value for ",EXPR" encoding
+   ((and (consp value) (eq (car value) '\,))
+    (rapid-package-json--normalize-lisp-value value))
    ((and (consp value)
          (consp (car value))
          (keywordp (caar value)))
@@ -1875,7 +1897,7 @@ For strings without special prefixes, interns them as symbols.
    ((stringp val)
     (cond
      ;; Escaped or has identifier prefix -> use denormalize-lisp-value
-     ((string-match-p "^[\\#':(\[?]" val)
+     ((string-match-p "^[\\#':(\[?,]" val)
       (rapid-package-json--denormalize-lisp-value val))
      ;; Plain string -> keep as string
      (t val)))
@@ -1908,6 +1930,9 @@ All other slots use denormalize-ir-slot."
                            v)
                           ;; (quote ...) forms: already quoted, pass through
                           ((and (consp v) (eq (car v) 'quote))
+                           v)
+                          ;; Unquote forms: pass through as-is
+                          ((and (consp v) (eq (car v) '\,))
                            v)
                           ;; Everything else: wrap in quote
                           (t (list 'quote v))))
