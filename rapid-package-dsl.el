@@ -385,7 +385,7 @@ Rules:
   otherwise     -> (quote VAL)"
   (cond
    ;; Unquote: ,value -> evaluate it
-   ((and (consp val) (eq (car val) 'unquote)) (cadr val))
+   ((and (consp val) (eq (car val) '\,)) (cadr val))
    ;; Already quoted
    ((and (listp val) (eq (car val) 'quote)) val)
    ;; Function reference: #'foo -> (function foo) -> pass through

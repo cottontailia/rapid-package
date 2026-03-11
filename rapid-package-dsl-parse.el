@@ -669,7 +669,7 @@ Returns (NEW-ACC . REMAINING-ARGS)."
   "Return non-nil if X is a valid :env-path directory value.
 Accepts strings and unquote forms `(,EXPR)'."
   (or (stringp x)
-      (and (consp x) (eq (car x) 'unquote))))
+      (and (consp x) (eq (car x) '\,))))
 
 (defun rapid-package-dsl--env-path-normalize-entry (item)
   "Normalize a single :env-path entry ITEM to a plist.
@@ -737,7 +737,7 @@ Returns (NEW-ACC . REMAINING-ARGS)."
   (let ((tl (or current-acc (rapid-package--tl-new))))
     (cond
      ;; Single unquote form ,EXPR -> treat as single entry directly
-     ((and (consp item) (eq (car item) 'unquote))
+     ((and (consp item) (eq (car item) '\,))
       (rapid-package--tl-append!
        tl (rapid-package-dsl--env-path-normalize-entry item)))
 
