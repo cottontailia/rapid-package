@@ -67,6 +67,7 @@
 
 (require 'cl-lib)
 (require 'json)
+(require 'pp)
 (require 'rapid-package-tl)
 (require 'rapid-package-dsl)
 (require 'rapid-package-dsl-parse)
