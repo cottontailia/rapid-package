@@ -485,6 +485,8 @@ Auto-defers when :hook, :bind, :mode, :magic, :interpreter, or
           (rapid-package--codegen-bucket-append!
            buckets :install
            `(unless (package-installed-p ',target)
+              (unless (assoc ',target package-archive-contents)
+                (package-refresh-contents))
               (package-install ',target))))))
 
       ;; :init
