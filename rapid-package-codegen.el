@@ -181,12 +181,7 @@ so the output uses #\\=' for proper compile-time function resolution."
             customs)))
 
 (defun rapid-package--codegen-custom-face-forms (faces)
-  "Return custom-set-faces forms for normalized FACES.
-The :value in each entry is a dsl-quote\\='d form, i.e. \\='((t ...)) stored as
-\\(quote ((t ...))). We unwrap it here so the generated call is:
-  (custom-set-faces \\='(FACE ((t ...))))
-rather than the incorrect double-quoted:
-  (custom-set-faces \\='(FACE \\='((t ...))))"
+  "Return `face-spec-set' forms for normalized FACES."
   (when faces
     (mapcar (lambda (entry)
               (let* ((face  (plist-get entry :variable))
@@ -196,7 +191,9 @@ rather than the incorrect double-quoted:
                              ((and (consp qval) (eq (car qval) 'quote)) (cadr qval))
                              ((and (consp qval) (eq (car qval) '\,))    (cadr qval))
                              (t qval))))
-                `(custom-set-faces '(,face ,spec))))
+                (if (and (consp qval) (eq (car qval) '\,))
+                    `(face-spec-set ',face ,spec)
+                  `(face-spec-set ',face ',spec))))
             faces)))
 
 (defun rapid-package--codegen-bind-keymap-forms (keymaps)
