@@ -468,14 +468,24 @@ Each FN must be a plain function symbol or #\\='SYMBOL form."
                            rest
                          (rapid-package-dsl--with-desugar-flat rest))))
            ;; mapcar returns a fresh list, safe to pass ownership
-           (rapid-package--tl-extend! bind-pairs
-                                      (mapcar (lambda (pair)
-                                                (let ((normalized (rapid-package-dsl--normalize-binding pair)))
-                                                  (plist-put normalized :command
-                                                             (rapid-package-dsl--normalize-fn
-                                                              (plist-get normalized :command)
-                                                              ":with :bind"))))
-                                              pairs))))
+           (rapid-package--tl-extend!
+            bind-pairs
+            (mapcar (lambda (pair)
+                      (let* ((normalized (rapid-package-dsl--normalize-binding pair))
+                             (raw-cmd    (plist-get normalized :command))
+                             (cmd (cond
+                                   ((symbolp raw-cmd) raw-cmd)
+                                   ((stringp raw-cmd) raw-cmd)
+                                   ((and (consp raw-cmd)
+                                         (memq (car raw-cmd) '(function quote))
+                                         (symbolp (cadr raw-cmd))
+                                         (null (cddr raw-cmd)))
+                                    (cadr raw-cmd))
+                                   (t
+                                    (error "DSL syntax error: :with :bind command must be a symbol, #\\'SYMBOL, or string: %S"
+                                           raw-cmd)))))
+                        (plist-put normalized :command cmd)))
+                    pairs))))
         (:unbind
          (when (eq kind :hook)
            (error "DSL syntax error: :with :unbind is not allowed for a hook (*-hook) symbol: %S"
