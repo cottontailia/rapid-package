@@ -27,6 +27,7 @@
 ;;; Code:
 
 (require 'help-mode)
+(require 'package)
 
 ;;; Customization
 
@@ -201,7 +202,6 @@ Returns summary string or nil."
 (defun rapid-package-inspector--package-summary (package)
   "Get summary/description for PACKAGE (string or symbol).
 Returns summary string or nil."
-  (require 'package nil t)
   (let* ((pkg-sym (if (symbolp package) package (intern package)))
          (pkg-name (symbol-name pkg-sym))
          summary)
