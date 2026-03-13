@@ -525,11 +525,10 @@ Auto-defers when :hook, :bind, :mode, :magic, :interpreter, or
            tl `(add-to-list 'interpreter-mode-alist '(,interp . ,pkg-name))))
         (rapid-package--tl-concat! (plist-get buckets :trigger) tl))
 
-      ;; :bind - separate global/map forms, place in trigger or config-pre
+      ;; :bind - split global vs keymap-local placement
       (when bindings
         (let ((global-tl (rapid-package--tl-new))
-              (map-tl    (rapid-package--tl-new))
-              (defer-explicit-p (and (plist-member p :defer) (plist-get p :defer))))
+              (map-tl    (rapid-package--tl-new)))
           (rapid-package--codegen-traverse-bindings
            bindings
            (lambda (key cmd _doc keymap)
@@ -540,9 +539,8 @@ Auto-defers when :hook, :bind, :mode, :magic, :interpreter, or
                 (if keymap
                     `(keymap-set ,keymap ,key #',cmd-sym)
                   `(keymap-global-set ,key #',cmd-sym))))))
-          (let ((bucket (if (or after defer-explicit-p) :config-pre :trigger)))
-            (rapid-package--tl-concat! (plist-get buckets bucket) global-tl)
-            (rapid-package--tl-concat! (plist-get buckets bucket) map-tl))))
+          (rapid-package--tl-concat! (plist-get buckets :trigger) global-tl)
+          (rapid-package--tl-concat! (plist-get buckets :config-pre) map-tl)))
 
       ;; :config-pre
       (let ((tl (rapid-package--tl-new)))
@@ -595,18 +593,18 @@ Auto-defers when :hook, :bind, :mode, :magic, :interpreter, or
                                 ,(rapid-package--wrap-body wrapped)))))
                     (car wrapped))))
                (demand-p
-                (rapid-package--tl-append! top-tl `(require ',pkg-name))
-                (rapid-package--tl-extend! top-tl config-forms)
-                nil)
+                `(progn
+                   (require ',pkg-name)
+                   ,@config-forms))
                ((not defer-p)
                 ;; Non-deferred: always emit require.
                 ;; When config-forms is nil (e.g. bare :ensure t with no other
                 ;; keywords) we still need to require the package — matching
                 ;; use-package's behaviour where absence of deferral triggers
                 ;; means the package is loaded immediately.
-                (rapid-package--tl-append! top-tl `(require ',pkg-name nil t))
-                (rapid-package--tl-extend! top-tl config-forms)
-                nil)
+                `(progn
+                   (require ',pkg-name nil t)
+                   ,@config-forms))
                (t
                 (when config-forms
                   `(with-eval-after-load ',pkg-name
