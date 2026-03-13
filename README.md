@@ -78,6 +78,7 @@
   (treesit-env-compiler-c++ '("zig" "c++" "-O3")))
 
 ;; Local Variables:
+;; eval: (use-local-map (copy-keymap (current-local-map)))
 ;; eval: (keymap-local-set "C-c i" #'rapid-package-inspector)
 ;; End:
 ```
