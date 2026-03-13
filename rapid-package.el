@@ -304,7 +304,7 @@ Currently not used internally, but reserved for future extensions.")
     (:custom-face . alist) ;; Custom faces
     (:variable . alist)    ;; Variable settings (3-element doc support)
     (:variable-default . alist) ;; Default value settings
-    (:diminish . flag)     ;; Hide minor mode from modeline
+    (:diminish . single)   ;; Hide minor mode from modeline
     (:delight . single)    ;; Customize modeline display
     (:disabled . flag)     ;; Disable this block entirely
     (:load-path . list)    ;; Directories to prepend to load-path
