@@ -246,45 +246,63 @@ Returns plist of lists: :user-options :internal-vars
 :cmds :hooks and optionally :major :minor :maps."
   (let* ((prefix (concat pkg "-"))
          (global-prefix (concat "global-" pkg "-"))
-         (user-options '()) (internal-vars '()) (cmds '()) (hooks '())
-         (major '()) (minor '()) (maps '()))
+         (user-options '())
+         (internal-vars '())
+         (cmds '())
+         (hooks '())
+         (major '())
+         (minor '())
+         (maps '()))
     (mapatoms
      (lambda (s)
        (let ((name (symbol-name s)))
          (when (or (string-prefix-p prefix name)
                    (string-prefix-p global-prefix name))
-           (cond
-            ;; User Options (defcustom)
-            ((rapid-package-inspector--custom-variable-p s) 
-             (push s user-options))
-            ;; Commands
-            ((commandp s) 
-             (push s cmds))
-            ;; Hooks
-            ((and (boundp s) 
-                  (or (string-suffix-p "-hook" name)
-                      (string-suffix-p "-functions" name)))
-             (push s hooks))
-            ;; Internal Variables (defvar but not defcustom)
-            ((boundp s)
-             (push s internal-vars)))
+           (let* ((is-bound (boundp s))
+                  (is-custom (rapid-package-inspector--custom-variable-p s))
+                  (is-command (commandp s))
+                  (is-hook (and is-bound
+                                (or (string-suffix-p "-hook" name)
+                                    (string-suffix-p "-functions" name))))
+                  (is-keymap (and is-bound
+                                  (keymapp (symbol-value s))
+                                  (or (string-suffix-p "-map" name)
+                                      (string-suffix-p "-mode-map" name)))))
+             ;; Categories are not mutually exclusive.
+             ;; In particular, defcustom-defined hooks/functions should be shown
+             ;; in both User Options and Hooks.
+             (when is-custom
+               (push s user-options))
 
-           (when rapid-package-inspector-include-modes-and-maps
-             (when (and (string-suffix-p "-mode" name) (fboundp s) (commandp s))
-               (cond
-                ((rapid-package-inspector--minor-mode-p s)
-                 (push s minor)
-                 (when-let ((ms (rapid-package-inspector--mode-map-symbol s)))
-                   (push ms maps)))
-                ((rapid-package-inspector--major-mode-p s)
-                 (push s major)
-                 (when-let ((ms (rapid-package-inspector--mode-map-symbol s)))
-                   (push ms maps)))))
+             (when is-command
+               (push s cmds))
 
-             (when (and (boundp s) (keymapp (symbol-value s))
-                        (or (string-suffix-p "-map" name)
-                            (string-suffix-p "-mode-map" name)))
-               (push s maps)))))))
+             (when is-hook
+               (push s hooks))
+
+             ;; Internal Variables (defvar but not defcustom / command / hook)
+             (when (and is-bound
+                        (not is-custom)
+                        (not is-command)
+                        (not is-hook))
+               (push s internal-vars))
+
+             (when rapid-package-inspector-include-modes-and-maps
+               (when (and (string-suffix-p "-mode" name)
+                          (fboundp s)
+                          is-command)
+                 (cond
+                  ((rapid-package-inspector--minor-mode-p s)
+                   (push s minor)
+                   (when-let ((ms (rapid-package-inspector--mode-map-symbol s)))
+                     (push ms maps)))
+                  ((rapid-package-inspector--major-mode-p s)
+                   (push s major)
+                   (when-let ((ms (rapid-package-inspector--mode-map-symbol s)))
+                     (push ms maps)))))
+
+               (when is-keymap
+                 (push s maps))))))))
 
     (let ((sym-name-less (lambda (a b) (string< (symbol-name a) (symbol-name b)))))
       (list :user-options (sort (delete-dups user-options) sym-name-less)
