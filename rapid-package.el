@@ -282,11 +282,14 @@ Currently not used internally, but reserved for future extensions.")
     (:unbind . ,(cons #'rapid-package-dsl-parse-unbind
                       #'rapid-package-dsl--finalize-unbind))   ;; Unbind keys
     (:hook . ,#'rapid-package-dsl-parse-hook) ;; Mode hooks (finalize = tl-value)
-    (:mode . list)         ;; Auto-mode-alist entries
+    (:mode . ,(cons #'rapid-package-dsl-parse-mode
+                    #'rapid-package--tl-value))        ;; Auto-mode-alist entries as (:pattern PAT :mode MODE) plists
     (:mode-enable . list)  ;; Modes to enable
     (:mode-disable . list) ;; Modes to disable
-    (:interpreter . list)  ;; Interpreter-mode-alist entries
-    (:magic . list)        ;; Magic-mode-alist entries (file content matching)
+    (:interpreter . ,(cons #'rapid-package-dsl-parse-interpreter
+                           #'rapid-package--tl-value)) ;; Interpreter-mode-alist entries as (:interpreter STR :mode MODE) plists
+    (:magic . ,(cons #'rapid-package-dsl-parse-magic
+                     #'rapid-package--tl-value))       ;; Magic-mode-alist entries as (:magic STR :mode MODE) plists
     (:when . single)       ;; Conditional loading
     (:unless . single)     ;; Conditional loading (negated)
     (:when-system . list)  ;; System type check (OR condition)
@@ -329,11 +332,14 @@ Each entry is (KEYWORD . TYPE) where TYPE can be:
     (:bind-keymap . alist) ;; Prefix keymap bindings
     (:unbind . ,(cons #'rapid-package-dsl-parse-unbind
                       #'rapid-package-dsl--finalize-unbind))  ;; Unbind keys
-    (:mode . list)         ;; Auto-mode-alist entries
+    (:mode . ,(cons #'rapid-package-dsl-parse-mode
+                    #'rapid-package--tl-value))        ;; Auto-mode-alist entries as (:pattern PAT :mode MODE) plists
     (:mode-enable . list)  ;; Modes to enable
     (:mode-disable . list) ;; Modes to disable
-    (:interpreter . list)  ;; Interpreter-mode-alist entries
-    (:magic . list)        ;; Magic-mode-alist entries (file content matching)
+    (:interpreter . ,(cons #'rapid-package-dsl-parse-interpreter
+                           #'rapid-package--tl-value)) ;; Interpreter-mode-alist entries as (:interpreter STR :mode MODE) plists
+    (:magic . ,(cons #'rapid-package-dsl-parse-magic
+                     #'rapid-package--tl-value))       ;; Magic-mode-alist entries as (:magic STR :mode MODE) plists
     (:init . body)         ;; Execute at init
     (:require . list)      ;; Require features
     (:config . body)       ;; Execute at config

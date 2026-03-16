@@ -20,10 +20,13 @@
 ;; rapid-package-dsl.el remains generic and syntax-focused.
 ;;
 ;; Parsers and their finalize functions (for (PARSER . FINALIZE) schema):
-;;   :bind    - parse-bind    / finalize-bind
-;;   :unbind  - parse-unbind  / finalize-unbind
-;;   :hook    - parse-hook    (bare; finalize = tl-value)
-;;   :with    - parse-with    (bare; finalize = tl-value)
+;;   :bind        - parse-bind        / finalize-bind
+;;   :unbind      - parse-unbind      / finalize-unbind
+;;   :hook        - parse-hook        (bare; finalize = tl-value)
+;;   :with        - parse-with        (bare; finalize = tl-value)
+;;   :mode        - parse-mode        (bare; finalize = tl-value)
+;;   :interpreter - parse-interpreter (bare; finalize = tl-value)
+;;   :magic       - parse-magic       (bare; finalize = tl-value)
 ;;
 ;; Private helpers follow the naming convention:
 ;;   rapid-package-dsl--<keyword>-<role>
@@ -600,6 +603,92 @@ IR per block:
      (t
       (error "DSL syntax error: :with expects a mode symbol or list of blocks, got: %S" item)))
 
+    (cons tl args)))
+
+;;; :mode / :interpreter / :magic parsers
+
+(defun rapid-package-dsl--normalize-mode-item (item)
+  "Normalize a :mode ITEM to plist format.
+Handles:
+  - (PATTERN . MODE)             -> (:pattern PAT :mode MODE)
+  - (PATTERN MODE)               -> (:pattern PAT :mode MODE)
+  - (PATTERN MODE \"description\") -> (:pattern PAT :mode MODE :description DOC)
+Bare strings and symbols are not accepted; mode must always be specified.
+Returns: (:pattern PATTERN :mode MODE [:description DOC])."
+  (if (consp item)
+      (rapid-package-dsl--normalize-pair item :pattern :mode)
+    (error "DSL syntax error: :mode entry must be (PATTERN MODE) or (PATTERN . MODE), got: %S" item)))
+
+(defun rapid-package-dsl--normalize-interpreter-item (item)
+  "Normalize an :interpreter ITEM to plist format.
+Handles:
+  - (INTERPRETER . MODE)             -> (:interpreter STR :mode MODE)
+  - (INTERPRETER MODE)               -> (:interpreter STR :mode MODE)
+  - (INTERPRETER MODE \"description\") -> + :description DOC
+Bare strings are not accepted; mode must always be specified.
+Returns: (:interpreter INTERPRETER :mode MODE [:description DOC])."
+  (if (consp item)
+      (rapid-package-dsl--normalize-pair item :interpreter :mode)
+    (error "DSL syntax error: :interpreter entry must be (INTERP MODE) or (INTERP . MODE), got: %S" item)))
+
+(defun rapid-package-dsl--normalize-magic-item (item)
+  "Normalize a :magic ITEM to plist format.
+Handles:
+  - (MAGIC . MODE)               -> (:magic STR :mode MODE)
+  - (MAGIC MODE)                 -> (:magic STR :mode MODE)
+  - (MAGIC MODE \"description\")   -> + :description DOC
+Bare strings are not accepted; mode must always be specified.
+Returns: (:magic MAGIC :mode MODE [:description DOC])."
+  (if (consp item)
+      (rapid-package-dsl--normalize-pair item :magic :mode)
+    (error "DSL syntax error: :magic entry must be (MAGIC MODE) or (MAGIC . MODE), got: %S" item)))
+
+(defun rapid-package-dsl-parse-mode (item args _current-key current-acc)
+  "Parse a :mode ITEM and accumulate into CURRENT-ACC.
+Accepted ITEM forms:
+  (PATTERN MODE)                 - explicit mode
+  (PATTERN . MODE)               - dotted pair form
+  (PATTERN MODE \"doc\")          - with description
+  ((PAT MODE) ...)               - container list of entries
+Returns (NEW-ACC . REMAINING-ARGS)."
+  (let ((tl (or current-acc (rapid-package--tl-new))))
+    (if (and (consp item)
+             (consp (car item)))
+        (dolist (entry item)
+          (rapid-package--tl-append! tl (rapid-package-dsl--normalize-mode-item entry)))
+      (rapid-package--tl-append! tl (rapid-package-dsl--normalize-mode-item item)))
+    (cons tl args)))
+
+(defun rapid-package-dsl-parse-interpreter (item args _current-key current-acc)
+  "Parse an :interpreter ITEM and accumulate into CURRENT-ACC.
+Accepted ITEM forms:
+  (INTERPRETER MODE)             - explicit mode
+  (INTERPRETER . MODE)           - dotted pair form
+  (INTERPRETER MODE \"doc\")      - with description
+  ((INTERP MODE) ...)            - container list of entries
+Returns (NEW-ACC . REMAINING-ARGS)."
+  (let ((tl (or current-acc (rapid-package--tl-new))))
+    (if (and (consp item)
+             (consp (car item)))
+        (dolist (entry item)
+          (rapid-package--tl-append! tl (rapid-package-dsl--normalize-interpreter-item entry)))
+      (rapid-package--tl-append! tl (rapid-package-dsl--normalize-interpreter-item item)))
+    (cons tl args)))
+
+(defun rapid-package-dsl-parse-magic (item args _current-key current-acc)
+  "Parse a :magic ITEM and accumulate into CURRENT-ACC.
+Accepted ITEM forms:
+  (MAGIC MODE)                   - explicit mode
+  (MAGIC . MODE)                 - dotted pair form
+  (MAGIC MODE \"doc\")            - with description
+  ((MAGIC MODE) ...)             - container list of entries
+Returns (NEW-ACC . REMAINING-ARGS)."
+  (let ((tl (or current-acc (rapid-package--tl-new))))
+    (if (and (consp item)
+             (consp (car item)))
+        (dolist (entry item)
+          (rapid-package--tl-append! tl (rapid-package-dsl--normalize-magic-item entry)))
+      (rapid-package--tl-append! tl (rapid-package-dsl--normalize-magic-item item)))
     (cons tl args)))
 
 ;;; :env parser
