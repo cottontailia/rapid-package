@@ -377,7 +377,14 @@ Kind, hook, and map are computed from :target at codegen time.
                  body-tl `(keymap-unset ,map ,(rapid-package--codegen-normalize-key key))))
               (let ((body-forms (rapid-package--tl-value body-tl)))
                 (rapid-package--tl-append! tl `(defun ,fn-name () ,@body-forms))
-                (rapid-package--tl-append! tl `(add-hook ',hook #',fn-name)))))))
+                (rapid-package--tl-append! tl `(add-hook ',hook #',fn-name)))))
+          ;; :mode/:interpreter/:magic patterns - always emitted outside hook fn
+          (dolist (pat (plist-get block :mode))
+            (rapid-package--tl-append! tl `(add-to-list 'auto-mode-alist '(,pat . ,target))))
+          (dolist (interp (plist-get block :interpreter))
+            (rapid-package--tl-append! tl `(add-to-list 'interpreter-mode-alist '(,interp . ,target))))
+          (dolist (magic (plist-get block :magic))
+            (rapid-package--tl-append! tl `(add-to-list 'magic-mode-alist '(,magic . ,target))))))
       (rapid-package--tl-value tl))))
 
 
@@ -505,14 +512,17 @@ Auto-defers when :hook, :bind, :mode, :magic, :interpreter, or
       ;; :trigger - autoloads, :mode, :magic, :interpreter
       (let ((tl (rapid-package--tl-new)))
         (dolist (cmd commands)
-          (rapid-package--tl-append! tl `(autoload ',cmd ,(symbol-name pkg-name) nil t)))
+          (rapid-package--tl-append!
+           tl `(unless (fboundp ',cmd)
+                 (autoload ',cmd ,(symbol-name pkg-name) nil t))))
         (when bindings
           (rapid-package--codegen-traverse-bindings
            bindings
            (lambda (_key cmd _doc _map)
              (let ((cmd-sym (rapid-package--codegen-normalize-cmd cmd)))
                (rapid-package--tl-append!
-                tl `(autoload ',cmd-sym ,(symbol-name pkg-name) nil t))))))
+                tl `(unless (fboundp ',cmd-sym)
+                      (autoload ',cmd-sym ,(symbol-name pkg-name) nil t)))))))
         (dolist (entry modes)
           (let ((pat  (plist-get entry :pattern))
                 (mode (plist-get entry :mode)))

@@ -420,26 +420,33 @@ Signals an error on odd item count."
     (rapid-package--tl-value tl)))
 
 (defun rapid-package-dsl--with-parse-subforms (subforms mode-sym kind)
-  "Parse SUBFORMS into a plist (:local PAIRS :calls FNS :bind PAIRS :unbind KEYS).
-SUBFORMS is a list of (:local ...), (:hook ...), (:bind ...), (:unbind ...)
-sublists.  KIND is :mode, :hook, or :map (from
-`rapid-package-dsl--with-normalize-mode').  MODE-SYM is the original mode
-symbol, used in error messages.
+  "Parse SUBFORMS into a plist of accumulated sub-keyword values.
+SUBFORMS is a list of (:local ...), (:hook ...), (:bind ...), (:unbind ...),
+(:mode ...), (:interpreter ...), (:magic ...) sublists.  KIND is :mode, :hook,
+or :map (from `rapid-package-dsl--with-normalize-mode').  MODE-SYM is the
+original mode symbol, used in error messages.
 
 Allowed subforms by KIND:
-  :mode - :local, :hook, :bind, :unbind
+  :mode - :local, :hook, :bind, :unbind, :mode, :interpreter, :magic
   :hook - :local and :hook only
   :map  - :bind and :unbind only
 
 (:hook FN ...) adds (FN) calls to the generated defun body.
-Each FN must be a plain function symbol or #\\='SYMBOL form."
+Each FN must be a plain function symbol or #\\='SYMBOL form.
+
+(:mode PATTERN ...), (:interpreter INTERP ...), (:magic REGEXP ...) register
+entries in auto-mode-alist, interpreter-mode-alist, and magic-mode-alist
+respectively.  The mode is inferred from the :with target symbol."
   (let ((local-pairs (rapid-package--tl-new))
         (call-fns (rapid-package--tl-new))
         (bind-pairs (rapid-package--tl-new))
-        (unbind-keys (rapid-package--tl-new)))
+        (unbind-keys (rapid-package--tl-new))
+        (mode-patterns (rapid-package--tl-new))
+        (interpreter-patterns (rapid-package--tl-new))
+        (magic-patterns (rapid-package--tl-new)))
     (dolist (sub subforms)
       (unless (and (consp sub) (keywordp (car sub)))
-        (error "DSL syntax error: :with subform must start with :local, :hook, :bind, or :unbind, got: %S" sub))
+        (error "DSL syntax error: :with subform must start with a keyword, got: %S" sub))
       (pcase (car sub)
         (:local
          (when (eq kind :map)
@@ -506,24 +513,47 @@ Each FN must be a plain function symbol or #\\='SYMBOL form."
                                rest)))))
            ;; keys might reference existing data (car rest or rest), must copy
            (rapid-package--tl-extend! unbind-keys (copy-sequence keys))))
+        (:mode
+         (when (memq kind '(:hook :map))
+           (error "DSL syntax error: :with :mode is not allowed for a %s symbol: %S"
+                  (if (eq kind :hook) "hook (*-hook)" "keymap (*-map)")
+                  mode-sym))
+         (rapid-package--tl-extend! mode-patterns (cdr sub)))
+        (:interpreter
+         (when (memq kind '(:hook :map))
+           (error "DSL syntax error: :with :interpreter is not allowed for a %s symbol: %S"
+                  (if (eq kind :hook) "hook (*-hook)" "keymap (*-map)")
+                  mode-sym))
+         (rapid-package--tl-extend! interpreter-patterns (cdr sub)))
+        (:magic
+         (when (memq kind '(:hook :map))
+           (error "DSL syntax error: :with :magic is not allowed for a %s symbol: %S"
+                  (if (eq kind :hook) "hook (*-hook)" "keymap (*-map)")
+                  mode-sym))
+         (rapid-package--tl-extend! magic-patterns (cdr sub)))
         (_
          (error "DSL syntax error: unknown :with subform keyword %S" (car sub)))))
     (list :local (rapid-package--tl-value local-pairs)
           :calls (rapid-package--tl-value call-fns)
           :bind (rapid-package--tl-value bind-pairs)
-          :unbind (rapid-package--tl-value unbind-keys))))
+          :unbind (rapid-package--tl-value unbind-keys)
+          :mode (rapid-package--tl-value mode-patterns)
+          :interpreter (rapid-package--tl-value interpreter-patterns)
+          :magic (rapid-package--tl-value magic-patterns))))
 
 (defun rapid-package-dsl--with-parse-block (mode-sym id-sym subforms)
   "Return a normalized :with IR plist for MODE-SYM with optional ID-SYM.
-SUBFORMS is a list of (:local ...), (:hook ...), (:bind ...),
-(:unbind ...) sublists.
+SUBFORMS is a list of (:local ...), (:hook ...), (:bind ...), (:unbind ...),
+(:mode ...), (:interpreter ...), (:magic ...) sublists.
 
 Simplified IR structure (only non-nil values included):
   (:target MODE [:id ID] [:local PAIRS] [:hook FNS]
-                [:bind PAIRS] [:unbind KEYS])
-  
+                [:bind PAIRS] [:unbind KEYS]
+                [:mode PATS] [:interpreter INTERPS]
+                [:magic MAGICS])
+
 The kind, hook name, and map name are derived from :target at codegen time."
-  (let* ((sub-ir (rapid-package-dsl--with-parse-subforms 
+  (let* ((sub-ir (rapid-package-dsl--with-parse-subforms
                   subforms mode-sym
                   (plist-get (rapid-package-dsl--with-normalize-mode mode-sym) :kind)))
          (result (list :target mode-sym)))
@@ -538,6 +568,12 @@ The kind, hook name, and map name are derived from :target at codegen time."
       (setq result (plist-put result :bind bindings)))
     (when-let ((unbindings (plist-get sub-ir :unbind)))
       (setq result (plist-put result :unbind unbindings)))
+    (when-let ((pats (plist-get sub-ir :mode)))
+      (setq result (plist-put result :mode pats)))
+    (when-let ((pats (plist-get sub-ir :interpreter)))
+      (setq result (plist-put result :interpreter pats)))
+    (when-let ((pats (plist-get sub-ir :magic)))
+      (setq result (plist-put result :magic pats)))
     result))
 
 (defun rapid-package-dsl-parse-with (item args _current-key current-acc)

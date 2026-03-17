@@ -95,6 +95,15 @@ If nil, only use timestamp (faster but less reliable)."
   :type 'boolean
   :group 'rapid-package)
 
+(defcustom rapid-package-native-compile nil
+  "If non-nil, use native compilation instead of byte compilation for cache.
+Native compilation produces faster code but requires Emacs to be built
+with native compilation support (check with `(featurep \\='native-compile)').
+If native compilation is requested but not available, falls back to
+byte compilation with a warning."
+  :type 'boolean
+  :group 'rapid-package)
+
 (defcustom rapid-package-always-ensure nil
   "If non-nil, :ensure t is the default for all packages."
   :type 'boolean
@@ -1130,8 +1139,8 @@ For example, /foo/bar/packages.el -> /foo/bar/packages.json."
                               (file-name-nondirectory source-file))
       (let* ((expanded-forms (rapid-package--expand-file source-file))
              (json-file (rapid-package--json-path-for source-file)))
-        (unless (rapid-package--compile-to-elc-only expanded-forms cache-elc)
-          (rapid-package--message 'cache 
+        (unless (rapid-package--compile-to-cache expanded-forms cache-elc)
+          (rapid-package--message 'cache
                                   "Warning: Failed to generate cache for %s (will recompile next time)"
                                   (file-name-nondirectory source-file)))
         (when rapid-package-json-auto-write
@@ -1168,9 +1177,9 @@ loads skip this work."
       (let* ((json-data (rapid-package--read-json source-file))
              (forms     (rapid-package--process-items json-data)))
         ;; forms already eval'd item-by-item inside process-items;
-        ;; compile them to .elc so the next load can skip this work.
-        (unless (rapid-package--compile-to-elc-only forms cache-elc)
-          (rapid-package--message 'cache 
+        ;; compile them to cache so the next load can skip this work.
+        (unless (rapid-package--compile-to-cache forms cache-elc)
+          (rapid-package--message 'cache
                                   "Warning: Failed to generate cache for %s (will recompile next time)"
                                   (file-name-nondirectory source-file)))
         (rapid-package--save-meta source-file cache-meta)
@@ -1202,7 +1211,7 @@ Returns the list of expanded forms (for writing to .elc cache)."
              (type (gethash "type" item)))
         (pcase type
           ("package"
-           (let* ((plist     (rapid-package--json-to-parsed item 'package))
+           (let* ((plist     (rapid-package--json-to-parsed item))
                   (head      (plist-get plist :_head))
                   (form      (rapid-package--expand-package
                               (car head)
@@ -1212,7 +1221,7 @@ Returns the list of expanded forms (for writing to .elc cache)."
              (rapid-package--tl-append! forms form)))
 
           ("config"
-           (let* ((plist     (rapid-package--json-to-parsed item 'config))
+           (let* ((plist     (rapid-package--json-to-parsed item))
                   (head      (plist-get plist :_head))
                   (form      (rapid-package--expand-conf
                               (car head)
@@ -1243,8 +1252,12 @@ Returns: (:elc PATH :meta PATH)."
          (cache-base (expand-file-name
                       (concat base-name "--" path-hash)
                       rapid-package-cache-dir)))
-    (list :elc  (concat cache-base ".elc")
-          :meta (concat cache-base ".meta"))))
+    (let ((compiled-ext (if (and rapid-package-native-compile
+                                 (featurep 'native-compile))
+                            ".eln"
+                          ".elc")))
+      (list :elc  (concat cache-base compiled-ext)
+            :meta (concat cache-base ".meta")))))
 
 (defun rapid-package--cache-valid-p (source-file cache-paths)
   "Return non-nil if the cache for SOURCE-FILE is ready to use.
@@ -1266,6 +1279,9 @@ CACHE-PATHS is the plist returned by `rapid-package--cache-paths'."
                 (string= (plist-get meta :emacs-version) emacs-version)
                 ;; Check rapid-package version compatibility
                 (string= (plist-get meta :rapid-package-version) rapid-package-version)
+                ;; Check cache type compatibility (byte vs native)
+                (eq (plist-get meta :cache-type)
+                    (if (rapid-package--native-compile-p) 'native 'byte))
                 ;; Check source file validity
                 (if rapid-package-use-hash-validation
                     (rapid-package--cache-valid-hybrid-p source-file meta)
@@ -1320,7 +1336,8 @@ META is the metadata plist."
                                    (rapid-package--file-hash source-file))
                     :compile-time (current-time)
                     :emacs-version emacs-version
-                    :rapid-package-version rapid-package-version)))
+                    :rapid-package-version rapid-package-version
+                    :cache-type (if (rapid-package--native-compile-p) 'native 'byte))))
     (with-temp-file meta-file
       (let ((print-length nil)
             (print-level nil))
@@ -1367,6 +1384,10 @@ The sibling .json file (if any) is not touched."
 
 ;;; Compilation
 
+(defun rapid-package--native-compile-p ()
+  "Return non-nil if native compilation is both requested and available."
+  (and rapid-package-native-compile (featurep 'native-compile)))
+
 (defun rapid-package--compile-to-elc-only (forms output-elc)
   "Byte-compile FORMS to OUTPUT-ELC via a temporary .el file.
 Returns t if successful, nil if compilation failed."
@@ -1393,6 +1414,50 @@ Returns t if successful, nil if compilation failed."
       (when (file-exists-p temp-el)  (delete-file temp-el))
       (when (file-exists-p temp-elc) (delete-file temp-elc)))
     success))
+
+(defun rapid-package--compile-to-eln (forms output-eln)
+  "Native-compile FORMS to OUTPUT-ELN via a temporary .el file.
+Returns t if successful, nil if compilation failed."
+  (let* ((temp-el (make-temp-file "rapid-compile-" nil ".el"))
+         (success nil))
+    (unwind-protect
+        (progn
+          (with-temp-file temp-el
+            (insert ";;; Compiled by rapid-package -*- lexical-binding: t; -*-\n\n")
+            (dolist (form forms)
+              (prin1 form (current-buffer))
+              (insert "\n\n")))
+          (condition-case err
+              (progn
+                (native-compile temp-el output-eln)
+                (if (file-exists-p output-eln)
+                    (setq success t)
+                  (rapid-package--message 'cache
+                                          "Warning: Cache generation failed for %s (native-compile did not produce .eln)"
+                                          (file-name-nondirectory output-eln))))
+            (error
+             (rapid-package--message 'cache
+                                     "Warning: Native compilation error for %s: %s"
+                                     (file-name-nondirectory output-eln) (error-message-string err)))))
+      (when (file-exists-p temp-el) (delete-file temp-el)))
+    success))
+
+(defun rapid-package--compile-to-cache (forms output-file)
+  "Compile FORMS to OUTPUT-FILE using native or byte compilation.
+Uses native compilation when `rapid-package-native-compile' is non-nil and
+native compilation is available; otherwise uses byte compilation.
+Falls back to byte compilation with a warning if native compilation is
+requested but unavailable.
+Returns t if successful, nil if compilation failed."
+  (cond
+   ((rapid-package--native-compile-p)
+    (rapid-package--compile-to-eln forms output-file))
+   ((and rapid-package-native-compile (not (featurep 'native-compile)))
+    (rapid-package--message 'cache
+                            "Warning: Native compilation requested but not available; falling back to byte compilation")
+    (rapid-package--compile-to-elc-only forms output-file))
+   (t
+    (rapid-package--compile-to-elc-only forms output-file))))
 
 ;;; Elisp File Processing
 
@@ -1801,11 +1866,11 @@ conversion via `rapid-package-json--field-json-value'."
 
 (defun rapid-package--package-to-json (plist json-obj)
   "Convert package PLIST to JSON-OBJ using generic conversion."
-  (rapid-package--plist-to-json-generic plist "package" json-obj))
+  (rapid-package--plist-to-json-generic plist "name" json-obj))
 
 (defun rapid-package--config-to-json (plist json-obj)
   "Convert config PLIST to JSON-OBJ using generic conversion."
-  (rapid-package--plist-to-json-generic plist "category" json-obj))
+  (rapid-package--plist-to-json-generic plist "name" json-obj))
 
 (defun rapid-package--to-json (plist type)
   "Convert PLIST to JSON object.
@@ -1814,6 +1879,7 @@ TYPE should be \\='package or \\='config.
 
 Returns a hash table ready for JSON encoding."
   (let ((json-obj (make-hash-table :test 'equal)))
+    (puthash "type" (if (eq type 'package) "package" "config") json-obj)
     (if (eq type 'package)
         (rapid-package--package-to-json plist json-obj)
       (rapid-package--config-to-json plist json-obj))
@@ -1828,15 +1894,7 @@ PACKAGES-DATA is a list of (:type TYPE :data PARSED-PLIST) entries."
     (dolist (item packages-data)
       (let ((type (plist-get item :type))
             (data (plist-get item :data)))
-        (cond
-         ((eq type 'package)
-          (let ((json-obj (rapid-package--to-json data 'package)))
-            (puthash "type" "package" json-obj)
-            (rapid-package--tl-append! items json-obj)))
-         ((eq type 'config)
-          (let ((json-obj (rapid-package--to-json data 'config)))
-            (puthash "type" "config" json-obj)
-            (rapid-package--tl-append! items json-obj))))))
+        (rapid-package--tl-append! items (rapid-package--to-json data type))))
     (puthash "items" (vconcat (rapid-package--tl-value items)) json-data)
     (puthash "metadata" (rapid-package--export-metadata) json-data)
     (with-temp-file json-file
@@ -1948,7 +2006,7 @@ All other slots use denormalize-ir-slot."
      hash)
     plist))
 
-(defun rapid-package--json-to-parsed (json-obj type)
+(defun rapid-package--json-to-parsed (json-obj)
   "Convert JSON-OBJ to a parsed plist.
 TYPE is \\='package or \\='config.
 Returns a plist in the same format as `rapid-package-dsl-parse'."
@@ -1956,13 +2014,13 @@ Returns a plist in the same format as `rapid-package-dsl-parse'."
     (maphash
      (lambda (key-str json-val)
        (let ((kw (intern (concat ":" key-str))))
-         (unless (memq kw '(:_head :package :category :description :type))
+         (unless (memq kw '(:_head :name :description :type))
            (let ((out (rapid-package-json--denormalize-field kw json-val)))
              ;; Import field if: (1) out is non-nil, OR (2) out is nil but key is flag-type
              (when (or out (and (null out) (rapid-package-json--is-flag-p kw)))
                (setq plist (plist-put plist kw out)))))))
      json-obj)
-    (let* ((head-key (if (eq type 'package) "package" "category"))
+    (let* ((head-key "name")
            (name-str (gethash head-key json-obj))
            (desc     (gethash "description" json-obj)))
       (unless (stringp name-str)
