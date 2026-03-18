@@ -880,6 +880,9 @@ if no conditions.
 Ignores :when and :unless (too complex for naming)."
   (let ((parts '())
         (tail args))
+    ;; Skip leading non-keyword elements (e.g. optional docstring)
+    (while (and tail (not (keywordp (car tail))))
+      (setq tail (cdr tail)))
     ;; Parse args to extract conditional keywords
     (while tail
       (let ((key (car tail))
@@ -1065,8 +1068,8 @@ Expands to:
          (suffix (rapid-package-after--build-category-suffix args))
          (category (intern (concat "after-" (symbol-name pkg-name) suffix))))
     `(rapid-package-conf ,category
-       :after ,pkg-name
-       ,@args)))
+       ,@args
+       :after ,pkg-name)))
 
 ;;; File Loading
 
