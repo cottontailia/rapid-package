@@ -1581,7 +1581,7 @@ Returns: body, ir, or lisp-value"
              (indent-tabs-mode nil)
              (formatted (if (> (cdr (func-arity 'pp-to-string)) 1)
                             (with-suppressed-warnings ((callargs pp-to-string)
-                                       (unresolved pp-fill))
+                                                       (unresolved pp-fill))
                               (pp-to-string form #'pp-fill))
                           (pp-to-string form)))
              (lines (split-string formatted "\n" t)))
