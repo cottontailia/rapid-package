@@ -380,10 +380,19 @@ Kind, hook, and map are computed from :target at codegen time.
                 (rapid-package--tl-append! tl `(add-hook ',hook #',fn-name)))))
           ;; :mode/:interpreter/:magic patterns - always emitted outside hook fn
           (dolist (pat (plist-get block :mode))
+            (rapid-package--tl-append!
+             tl `(unless (fboundp ',target)
+                   (autoload ',target ,(symbol-name name) nil t)))
             (rapid-package--tl-append! tl `(add-to-list 'auto-mode-alist '(,pat . ,target))))
           (dolist (interp (plist-get block :interpreter))
+            (rapid-package--tl-append!
+             tl `(unless (fboundp ',target)
+                   (autoload ',target ,(symbol-name name) nil t)))
             (rapid-package--tl-append! tl `(add-to-list 'interpreter-mode-alist '(,interp . ,target))))
           (dolist (magic (plist-get block :magic))
+            (rapid-package--tl-append!
+             tl `(unless (fboundp ',target)
+                   (autoload ',target ,(symbol-name name) nil t)))
             (rapid-package--tl-append! tl `(add-to-list 'magic-mode-alist '(,magic . ,target))))))
       (rapid-package--tl-value tl))))
 
@@ -526,25 +535,25 @@ Auto-defers when :hook, :bind, :mode, :magic, :interpreter, or
         (dolist (entry modes)
           (let ((pat  (plist-get entry :pattern))
                 (mode (plist-get entry :mode)))
-            (rapid-package--tl-append! tl `(add-to-list 'auto-mode-alist '(,pat . ,mode)))
             (rapid-package--tl-append!
              tl `(unless (fboundp ',mode)
-                   (autoload ',mode ,(symbol-name pkg-name) nil t)))))
+                   (autoload ',mode ,(symbol-name pkg-name) nil t)))
+            (rapid-package--tl-append! tl `(add-to-list 'auto-mode-alist '(,pat . ,mode)))))
         (dolist (entry magics)
           (let ((pat  (plist-get entry :magic))
                 (mode (plist-get entry :mode)))
-            (rapid-package--tl-append! tl `(add-to-list 'magic-mode-alist '(,pat . ,mode)))
             (rapid-package--tl-append!
              tl `(unless (fboundp ',mode)
-                   (autoload ',mode ,(symbol-name pkg-name) nil t)))))
+                   (autoload ',mode ,(symbol-name pkg-name) nil t)))
+            (rapid-package--tl-append! tl `(add-to-list 'magic-mode-alist '(,pat . ,mode)))))
         (dolist (entry interpreters)
           (let ((interp (plist-get entry :interpreter))
                 (mode   (plist-get entry :mode)))
             (rapid-package--tl-append!
-             tl `(add-to-list 'interpreter-mode-alist '(,interp . ,mode)))
-            (rapid-package--tl-append!
              tl `(unless (fboundp ',mode)
-                   (autoload ',mode ,(symbol-name pkg-name) nil t)))))
+                   (autoload ',mode ,(symbol-name pkg-name) nil t)))
+            (rapid-package--tl-append!
+             tl `(add-to-list 'interpreter-mode-alist '(,interp . ,mode)))))
         (rapid-package--tl-concat! (plist-get buckets :trigger) tl))
 
       ;; :bind - split global vs keymap-local placement
