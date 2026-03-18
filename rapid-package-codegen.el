@@ -381,29 +381,32 @@ Kind, hook, and map are computed from :target at codegen time.
 ))
       (rapid-package--tl-value tl))))
 
-(defun rapid-package--codegen-with-trigger-forms (with-blocks name)
+(defun rapid-package--codegen-with-trigger-forms (with-blocks name &optional seen-autoloads)
   "Return trigger forms for WITH-BLOCKS: autoload + alist registration for NAME.
 These forms must run unconditionally (outside any with-eval-after-load),
-mirroring the behaviour of top-level :mode/:interpreter/:magic."
+mirroring the behaviour of top-level :mode/:interpreter/:magic.
+SEEN-AUTOLOADS is an optional hash table of already-emitted mode symbols;
+when provided, autoloads are deduplicated across the caller's scope."
   (when with-blocks
-    (let ((tl (rapid-package--tl-new)))
+    (let ((tl   (rapid-package--tl-new))
+          (seen (or seen-autoloads (make-hash-table :test 'eq))))
       (dolist (block with-blocks)
         (let ((target (plist-get block :target)))
-          (dolist (pat (plist-get block :mode))
-            (rapid-package--tl-append!
-             tl `(unless (fboundp ',target)
-                   (autoload ',target ,(symbol-name name) nil t)))
-            (rapid-package--tl-append! tl `(add-to-list 'auto-mode-alist '(,pat . ,target))))
-          (dolist (interp (plist-get block :interpreter))
-            (rapid-package--tl-append!
-             tl `(unless (fboundp ',target)
-                   (autoload ',target ,(symbol-name name) nil t)))
-            (rapid-package--tl-append! tl `(add-to-list 'interpreter-mode-alist '(,interp . ,target))))
-          (dolist (magic (plist-get block :magic))
-            (rapid-package--tl-append!
-             tl `(unless (fboundp ',target)
-                   (autoload ',target ,(symbol-name name) nil t)))
-            (rapid-package--tl-append! tl `(add-to-list 'magic-mode-alist '(,magic . ,target))))))
+          (cl-flet ((emit-autoload! ()
+                      (unless (gethash target seen)
+                        (puthash target t seen)
+                        (rapid-package--tl-append!
+                         tl `(unless (fboundp ',target)
+                               (autoload ',target ,(symbol-name name) nil t))))))
+            (dolist (pat (plist-get block :mode))
+              (emit-autoload!)
+              (rapid-package--tl-append! tl `(add-to-list 'auto-mode-alist '(,pat . ,target))))
+            (dolist (interp (plist-get block :interpreter))
+              (emit-autoload!)
+              (rapid-package--tl-append! tl `(add-to-list 'interpreter-mode-alist '(,interp . ,target))))
+            (dolist (magic (plist-get block :magic))
+              (emit-autoload!)
+              (rapid-package--tl-append! tl `(add-to-list 'magic-mode-alist '(,magic . ,target)))))))
       (rapid-package--tl-value tl))))
 
 
@@ -534,42 +537,39 @@ or a :with block containing :mode/:interpreter/:magic is present."
            buckets :config-pre `(require ',feature))))
 
       ;; :trigger - autoloads, :mode, :magic, :interpreter
-      (let ((tl (rapid-package--tl-new)))
-        (dolist (cmd commands)
-          (rapid-package--tl-append!
-           tl `(unless (fboundp ',cmd)
-                 (autoload ',cmd ,(symbol-name pkg-name) nil t))))
-        (when bindings
-          (rapid-package--codegen-traverse-bindings
-           bindings
-           (lambda (_key cmd _doc _map)
-             (let ((cmd-sym (rapid-package--codegen-normalize-cmd cmd)))
-               (rapid-package--tl-append!
-                tl `(unless (fboundp ',cmd-sym)
-                      (autoload ',cmd-sym ,(symbol-name pkg-name) nil t)))))))
-        (dolist (entry modes)
-          (let ((pat  (plist-get entry :pattern))
-                (mode (plist-get entry :mode)))
-            (rapid-package--tl-append!
-             tl `(unless (fboundp ',mode)
-                   (autoload ',mode ,(symbol-name pkg-name) nil t)))
-            (rapid-package--tl-append! tl `(add-to-list 'auto-mode-alist '(,pat . ,mode)))))
-        (dolist (entry magics)
-          (let ((pat  (plist-get entry :magic))
-                (mode (plist-get entry :mode)))
-            (rapid-package--tl-append!
-             tl `(unless (fboundp ',mode)
-                   (autoload ',mode ,(symbol-name pkg-name) nil t)))
-            (rapid-package--tl-append! tl `(add-to-list 'magic-mode-alist '(,pat . ,mode)))))
-        (dolist (entry interpreters)
-          (let ((interp (plist-get entry :interpreter))
-                (mode   (plist-get entry :mode)))
-            (rapid-package--tl-append!
-             tl `(unless (fboundp ',mode)
-                   (autoload ',mode ,(symbol-name pkg-name) nil t)))
-            (rapid-package--tl-append!
-             tl `(add-to-list 'interpreter-mode-alist '(,interp . ,mode)))))
-        (rapid-package--tl-extend! tl (rapid-package--codegen-with-trigger-forms with-blocks pkg-name))
+      (let ((tl (rapid-package--tl-new))
+            (seen-autoloads (make-hash-table :test 'eq)))
+        (cl-flet ((emit-autoload! (sym)
+                    (unless (gethash sym seen-autoloads)
+                      (puthash sym t seen-autoloads)
+                      (rapid-package--tl-append!
+                       tl `(unless (fboundp ',sym)
+                             (autoload ',sym ,(symbol-name pkg-name) nil t))))))
+          (dolist (cmd commands)
+            (emit-autoload! cmd))
+          (when bindings
+            (rapid-package--codegen-traverse-bindings
+             bindings
+             (lambda (_key cmd _doc _map)
+               (emit-autoload! (rapid-package--codegen-normalize-cmd cmd)))))
+          (dolist (entry modes)
+            (let ((pat  (plist-get entry :pattern))
+                  (mode (plist-get entry :mode)))
+              (emit-autoload! mode)
+              (rapid-package--tl-append! tl `(add-to-list 'auto-mode-alist '(,pat . ,mode)))))
+          (dolist (entry magics)
+            (let ((pat  (plist-get entry :magic))
+                  (mode (plist-get entry :mode)))
+              (emit-autoload! mode)
+              (rapid-package--tl-append! tl `(add-to-list 'magic-mode-alist '(,pat . ,mode)))))
+          (dolist (entry interpreters)
+            (let ((interp (plist-get entry :interpreter))
+                  (mode   (plist-get entry :mode)))
+              (emit-autoload! mode)
+              (rapid-package--tl-append!
+               tl `(add-to-list 'interpreter-mode-alist '(,interp . ,mode)))))
+          (rapid-package--tl-extend!
+           tl (rapid-package--codegen-with-trigger-forms with-blocks pkg-name seen-autoloads)))
         (rapid-package--tl-concat! (plist-get buckets :trigger) tl))
 
       ;; :bind - split global vs keymap-local placement
