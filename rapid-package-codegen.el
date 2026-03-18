@@ -437,12 +437,26 @@ are normalized to top-level IR entries by the caller via rapid-package--with-exp
   "Return non-nil if PLIST requests package installation."
   (rapid-package--codegen-get-flag plist :ensure))
 
+(defun rapid-package--codegen-has-global-bind-p (bindings)
+  "Return non-nil if BINDINGS contains at least one global (non-map) keybinding."
+  (let (found)
+    (rapid-package--codegen-traverse-bindings
+     bindings
+     (lambda (_key _cmd _doc keymap)
+       (unless keymap (setq found t))))
+    found))
+
 (defun rapid-package--codegen-defer-p (plist)
   "Return non-nil if PLIST requests deferred loading.
-Auto-defers when :hook, :bind, :mode, :magic, :interpreter, :commands,
-or a :with block containing :mode/:interpreter/:magic is present."
+Auto-defers when :hook, :mode, :magic, :interpreter, :commands are present,
+or when :bind contains at least one global (non-map-local) keybinding,
+or a :with block containing :mode/:interpreter/:magic is present.
+
+Map-local :bind (:map ...) alone does NOT trigger auto-defer."
   (or (rapid-package--codegen-get-flag plist :defer
-                                       '(:hook :bind :mode :magic :interpreter :commands))
+                                       '(:hook :mode :magic :interpreter :commands))
+      (when (plist-get plist :bind)
+        (rapid-package--codegen-has-global-bind-p (plist-get plist :bind)))
       (cl-some (lambda (block)
                  (or (plist-get block :mode)
                      (plist-get block :interpreter)
