@@ -378,7 +378,17 @@ Kind, hook, and map are computed from :target at codegen time.
               (let ((body-forms (rapid-package--tl-value body-tl)))
                 (rapid-package--tl-append! tl `(defun ,fn-name () ,@body-forms))
                 (rapid-package--tl-append! tl `(add-hook ',hook #',fn-name)))))
-          ;; :mode/:interpreter/:magic patterns - always emitted outside hook fn
+))
+      (rapid-package--tl-value tl))))
+
+(defun rapid-package--codegen-with-trigger-forms (with-blocks name)
+  "Return trigger forms for WITH-BLOCKS: autoload + alist registration for NAME.
+These forms must run unconditionally (outside any with-eval-after-load),
+mirroring the behaviour of top-level :mode/:interpreter/:magic."
+  (when with-blocks
+    (let ((tl (rapid-package--tl-new)))
+      (dolist (block with-blocks)
+        (let ((target (plist-get block :target)))
           (dolist (pat (plist-get block :mode))
             (rapid-package--tl-append!
              tl `(unless (fboundp ',target)
@@ -411,10 +421,15 @@ Kind, hook, and map are computed from :target at codegen time.
 
 (defun rapid-package--codegen-defer-p (plist)
   "Return non-nil if PLIST requests deferred loading.
-Auto-defers when :hook, :bind, :mode, :magic, :interpreter, or
-:commands is present."
-  (rapid-package--codegen-get-flag plist :defer
-                                   '(:hook :bind :mode :magic :interpreter :commands)))
+Auto-defers when :hook, :bind, :mode, :magic, :interpreter, :commands,
+or a :with block containing :mode/:interpreter/:magic is present."
+  (or (rapid-package--codegen-get-flag plist :defer
+                                       '(:hook :bind :mode :magic :interpreter :commands))
+      (cl-some (lambda (block)
+                 (or (plist-get block :mode)
+                     (plist-get block :interpreter)
+                     (plist-get block :magic)))
+               (plist-get plist :with))))
 
 (defun rapid-package--codegen-demand-p (plist)
   "Return non-nil if PLIST requests immediate loading via :demand."
@@ -554,6 +569,7 @@ Auto-defers when :hook, :bind, :mode, :magic, :interpreter, or
                    (autoload ',mode ,(symbol-name pkg-name) nil t)))
             (rapid-package--tl-append!
              tl `(add-to-list 'interpreter-mode-alist '(,interp . ,mode)))))
+        (rapid-package--tl-extend! tl (rapid-package--codegen-with-trigger-forms with-blocks pkg-name))
         (rapid-package--tl-concat! (plist-get buckets :trigger) tl))
 
       ;; :bind - split global vs keymap-local placement
@@ -728,6 +744,7 @@ Condition wrapping is handled by the caller (`rapid-package--expand-conf')."
           (rapid-package--tl-extend! body-tl (rapid-package--codegen-bind-forms bindings))
           (rapid-package--tl-extend! body-tl (rapid-package--codegen-unbind-forms unbind-keys))
           (rapid-package--tl-extend! body-tl (rapid-package--codegen-with-forms with-blocks cat "rapid-package--with-conf"))
+          (rapid-package--tl-extend! body-tl (rapid-package--codegen-with-trigger-forms with-blocks cat))
           ;; :mode, :interpreter, :magic
           (dolist (entry modes)
             (let ((pat  (plist-get entry :pattern))
