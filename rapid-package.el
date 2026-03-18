@@ -68,6 +68,7 @@
 (require 'cl-lib)
 (require 'json)
 (require 'pp)
+(declare-function pp-fill "pp")
 (require 'rapid-package-tl)
 (require 'rapid-package-dsl)
 (require 'rapid-package-dsl-parse)
@@ -1578,7 +1579,11 @@ Returns: body, ir, or lisp-value"
              (print-length nil)
              (print-level nil)
              (indent-tabs-mode nil)
-             (formatted (pp-to-string form #'pp-fill))
+             (formatted (if (> (cdr (func-arity 'pp-to-string)) 1)
+                            (with-suppressed-warnings ((callargs pp-to-string)
+                                       (unresolved pp-fill))
+                              (pp-to-string form #'pp-fill))
+                          (pp-to-string form)))
              (lines (split-string formatted "\n" t)))
         ;; split-string returns a fresh list, safe to pass ownership
         (rapid-package--tl-extend! all-lines lines)))
@@ -1738,7 +1743,10 @@ to format with proper line breaks and indentation."
              (print-length nil)
              (print-level nil)
              (indent-tabs-mode nil))
-        (pp-to-string form #'pp-fill)))))
+        (if (> (cdr (func-arity 'pp-to-string)) 1)
+            (with-suppressed-warnings ((callargs pp-to-string))
+              (pp-to-string form #'pp-fill))
+          (pp-to-string form))))))
 
 (defun rapid-package-json--normalize-ir-value (value)
   "Normalize VALUE that is an IR plist list or body form list.
@@ -2011,7 +2019,6 @@ All other slots use denormalize-ir-slot."
 
 (defun rapid-package--json-to-parsed (json-obj)
   "Convert JSON-OBJ to a parsed plist.
-TYPE is \\='package or \\='config.
 Returns a plist in the same format as `rapid-package-dsl-parse'."
   (let ((plist nil))
     (maphash
