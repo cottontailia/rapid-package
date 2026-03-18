@@ -388,15 +388,18 @@ PREFIX is the function-name prefix string:
 Blocks use simplified IR with :target instead of :kind/:mode/:hook/:map.
 Kind, hook, and map are computed from :target at codegen time.
 
-Only :local and :hook subforms are handled here; :bind/:unbind/:mode/:interpreter/:magic
-are normalized to top-level IR entries by the caller via rapid-package--with-expand-*.
+Only :local and :hook subforms are handled here; :bind/:unbind/:mode/
+:interpreter/:magic are normalized to top-level IR entries by the caller
+via rapid-package--with-expand-*.
 
-:kind :mode / :hook - generates defun + add-hook when :local or :hook is non-nil:
+:kind :mode / :hook - generates defun + add-hook when :local or :hook is
+non-nil:
   (defun FN () (setq-local VAR VAL) ... (FN1) (FN2) ...)
   (add-hook \\='HOOK #\\='FN)
   Body order: :local (setq-local) then :hook (fn calls).
 
-:kind :map - no forms emitted (all keymap forms are handled via expand-bindings/unbinds)."
+:kind :map - no forms emitted (all keymap forms are handled via
+expand-bindings/unbinds)."
   (when with-blocks
     (let ((tl (rapid-package--tl-new)))
       (dolist (block with-blocks)
