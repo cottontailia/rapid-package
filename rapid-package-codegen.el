@@ -272,6 +272,72 @@ PATH entries also sync `exec-path'."
 
 ;;; :with codegen
 
+;;; :with expand helpers
+;; These normalize :with block subforms to top-level IR entries at codegen time.
+;; The IR produced by the parser is left unchanged; normalization happens here.
+
+(defun rapid-package--with-expand-modes (with-blocks)
+  "Expand :mode patterns from WITH-BLOCKS to top-level :mode IR entries.
+Returns a list of (:pattern PAT :mode TARGET) plists."
+  (let (result)
+    (dolist (block with-blocks)
+      (let ((target (plist-get block :target)))
+        (dolist (pat (plist-get block :mode))
+          (push `(:pattern ,pat :mode ,target) result))))
+    (nreverse result)))
+
+(defun rapid-package--with-expand-interpreters (with-blocks)
+  "Expand :interpreter entries from WITH-BLOCKS to top-level IR entries.
+Returns a list of (:interpreter INTERP :mode TARGET) plists."
+  (let (result)
+    (dolist (block with-blocks)
+      (let ((target (plist-get block :target)))
+        (dolist (interp (plist-get block :interpreter))
+          (push `(:interpreter ,interp :mode ,target) result))))
+    (nreverse result)))
+
+(defun rapid-package--with-expand-magics (with-blocks)
+  "Expand :magic entries from WITH-BLOCKS to top-level IR entries.
+Returns a list of (:magic MAGIC :mode TARGET) plists."
+  (let (result)
+    (dolist (block with-blocks)
+      (let ((target (plist-get block :target)))
+        (dolist (magic (plist-get block :magic))
+          (push `(:magic ,magic :mode ,target) result))))
+    (nreverse result)))
+
+(defun rapid-package--with-expand-bindings (with-blocks)
+  "Expand :bind entries from WITH-BLOCKS to top-level bind IR groups.
+KIND=:map  uses TARGET directly as the keymap.
+KIND=:mode derives TARGET-map as the keymap.
+KIND=:hook is skipped (map is nil).
+Returns a list of (:map (MAP) :bind PAIRS) plists."
+  (let (result)
+    (dolist (block with-blocks)
+      (let* ((target (plist-get block :target))
+             (info   (rapid-package--codegen-with-target-info target))
+             (map    (plist-get info :map))
+             (binds  (plist-get block :bind)))
+        (when (and binds map)
+          (push `(:map (,map) :bind ,binds) result))))
+    (nreverse result)))
+
+(defun rapid-package--with-expand-unbinds (with-blocks)
+  "Expand :unbind entries from WITH-BLOCKS to top-level unbind IR groups.
+KIND=:map  uses TARGET directly as the keymap.
+KIND=:mode derives TARGET-map as the keymap.
+KIND=:hook is skipped (map is nil).
+Returns a list of (:map (MAP) :unbind KEYS) plists."
+  (let (result)
+    (dolist (block with-blocks)
+      (let* ((target  (plist-get block :target))
+             (info    (rapid-package--codegen-with-target-info target))
+             (map     (plist-get info :map))
+             (unbinds (plist-get block :unbind)))
+        (when (and unbinds map)
+          (push `(:map (,map) :unbind ,unbinds) result))))
+    (nreverse result)))
+
 (defun rapid-package--codegen-with-target-info (target)
   "Compute kind, hook, and map from TARGET symbol.
 Returns a plist: (:kind KIND :hook HOOK :map MAP)
@@ -322,42 +388,30 @@ PREFIX is the function-name prefix string:
 Blocks use simplified IR with :target instead of :kind/:mode/:hook/:map.
 Kind, hook, and map are computed from :target at codegen time.
 
-:kind :mode / :hook - generates defun + add-hook:
-  (defun FN () (setq-local VAR VAL) ... (FN1) (FN2) ... (keymap-set ...) ...)
-  (add-hook \\='HOOK #\\='FN)
-  Body order: :local (setq-local) then :hook (fn calls) then :bind (keymap-set).
+Only :local and :hook subforms are handled here; :bind/:unbind/:mode/:interpreter/:magic
+are normalized to top-level IR entries by the caller via rapid-package--with-expand-*.
 
-:kind :map - no defun/add-hook; keymap forms emitted directly:
-  (keymap-set MAP KEY #\\='CMD) ...
-  (keymap-unset MAP KEY) ..."
+:kind :mode / :hook - generates defun + add-hook when :local or :hook is non-nil:
+  (defun FN () (setq-local VAR VAL) ... (FN1) (FN2) ...)
+  (add-hook \\='HOOK #\\='FN)
+  Body order: :local (setq-local) then :hook (fn calls).
+
+:kind :map - no forms emitted (all keymap forms are handled via expand-bindings/unbinds)."
   (when with-blocks
     (let ((tl (rapid-package--tl-new)))
       (dolist (block with-blocks)
-        (let* ((target    (plist-get block :target))
-               (info      (rapid-package--codegen-with-target-info target))
-               (kind      (plist-get info :kind))
-               (hook      (plist-get info :hook))
-               (map       (plist-get info :map))
-               (id-sym    (plist-get block :id))
-               (locals    (plist-get block :local))
-               (hooks     (plist-get block :hook))
-               (binds     (plist-get block :bind))
-               (unbinds   (plist-get block :unbind)))
-          (if (eq kind :map)
-              ;; :kind :map - emit keymap forms directly, no defun/add-hook
-              (progn
-                (dolist (pair binds)
-                  (let ((key      (rapid-package--codegen-normalize-key (plist-get pair :key)))
-                        (cmd-form (if (stringp (plist-get pair :command))
-                                      (plist-get pair :command)
-                                    `#',(rapid-package--codegen-normalize-cmd (plist-get pair :command)))))
-                    (rapid-package--tl-append! tl `(keymap-set ,map ,key ,cmd-form))))
-                (dolist (key unbinds)
-                  (rapid-package--tl-append!
-                   tl `(keymap-unset ,map ,(rapid-package--codegen-normalize-key key)))))
-            ;; :kind :mode / :hook - wrap in defun + add-hook
-            (let* ((fn-name (rapid-package--codegen-with-fn-name prefix name target id-sym))
-                   (body-tl (rapid-package--tl-new)))
+        (let* ((target (plist-get block :target))
+               (info   (rapid-package--codegen-with-target-info target))
+               (kind   (plist-get info :kind))
+               (hook   (plist-get info :hook))
+               (id-sym (plist-get block :id))
+               (locals (plist-get block :local))
+               (hooks  (plist-get block :hook)))
+          ;; :kind :map - nothing to emit here; bind/unbind handled by expand helpers.
+          ;; :kind :mode / :hook - defun + add-hook only when body is non-empty.
+          (unless (eq kind :map)
+            (let* ((fn-name  (rapid-package--codegen-with-fn-name prefix name target id-sym))
+                   (body-tl  (rapid-package--tl-new)))
               (dolist (entry locals)
                 (rapid-package--tl-append! body-tl
                                            `(setq-local ,(plist-get entry :variable)
@@ -365,50 +419,11 @@ Kind, hook, and map are computed from :target at codegen time.
                                                           (plist-get entry :value)))))
               (dolist (fn hooks)
                 (rapid-package--tl-append! body-tl `(,fn)))
-              (dolist (pair binds)
-                (let ((key      (rapid-package--codegen-normalize-key (plist-get pair :key)))
-                      (cmd-form (if (stringp (plist-get pair :command))
-                                    (plist-get pair :command)
-                                  `#',(rapid-package--codegen-normalize-cmd (plist-get pair :command)))))
-                  (rapid-package--tl-append! body-tl
-                                             `(keymap-set ,map ,key ,cmd-form))))
-              (dolist (key unbinds)
-                (rapid-package--tl-append!
-                 body-tl `(keymap-unset ,map ,(rapid-package--codegen-normalize-key key))))
               (let ((body-forms (rapid-package--tl-value body-tl)))
-                (rapid-package--tl-append! tl `(defun ,fn-name () ,@body-forms))
-                (rapid-package--tl-append! tl `(add-hook ',hook #',fn-name)))))
-))
+                (when body-forms
+                  (rapid-package--tl-append! tl `(defun ,fn-name () ,@body-forms))
+                  (rapid-package--tl-append! tl `(add-hook ',hook #',fn-name))))))))
       (rapid-package--tl-value tl))))
-
-(defun rapid-package--codegen-with-trigger-forms (with-blocks name &optional seen-autoloads)
-  "Return trigger forms for WITH-BLOCKS: autoload + alist registration for NAME.
-These forms must run unconditionally (outside any with-eval-after-load),
-mirroring the behaviour of top-level :mode/:interpreter/:magic.
-SEEN-AUTOLOADS is an optional hash table of already-emitted mode symbols;
-when provided, autoloads are deduplicated across the caller's scope."
-  (when with-blocks
-    (let ((tl   (rapid-package--tl-new))
-          (seen (or seen-autoloads (make-hash-table :test 'eq))))
-      (dolist (block with-blocks)
-        (let ((target (plist-get block :target)))
-          (cl-flet ((emit-autoload! ()
-                      (unless (gethash target seen)
-                        (puthash target t seen)
-                        (rapid-package--tl-append!
-                         tl `(unless (fboundp ',target)
-                               (autoload ',target ,(symbol-name name) nil t))))))
-            (dolist (pat (plist-get block :mode))
-              (emit-autoload!)
-              (rapid-package--tl-append! tl `(add-to-list 'auto-mode-alist '(,pat . ,target))))
-            (dolist (interp (plist-get block :interpreter))
-              (emit-autoload!)
-              (rapid-package--tl-append! tl `(add-to-list 'interpreter-mode-alist '(,interp . ,target))))
-            (dolist (magic (plist-get block :magic))
-              (emit-autoload!)
-              (rapid-package--tl-append! tl `(add-to-list 'magic-mode-alist '(,magic . ,target)))))))
-      (rapid-package--tl-value tl))))
-
 
 
 (defun rapid-package--codegen-get-flag (plist key &optional auto-keys default)
@@ -483,7 +498,15 @@ or a :with block containing :mode/:interpreter/:magic is present."
          (env-pairs        (plist-get p :env))
          (env-path-entries (plist-get p :env-path)))
 
-    (let* ((buckets (rapid-package--codegen-bucket-new
+    ;; Normalize :with subforms to top-level equivalents at codegen time.
+    ;; :mode/:interpreter/:magic merged for unified autoload dedup.
+    ;; :bind/:unbind merged for unified keymap-set/unset placement.
+    (let* ((all-modes        (append modes        (rapid-package--with-expand-modes with-blocks)))
+           (all-interpreters (append interpreters (rapid-package--with-expand-interpreters with-blocks)))
+           (all-magics       (append magics       (rapid-package--with-expand-magics with-blocks)))
+           (all-bindings     (append bindings     (rapid-package--with-expand-bindings with-blocks)))
+           (all-unbinds      (append unbind-keys  (rapid-package--with-expand-unbinds with-blocks)))
+           (buckets (rapid-package--codegen-bucket-new
                      '(:preface :pin :install :init :trigger
                                 :config-pre :config-post)))
            (bucket-order '(:preface :pin :install :init :trigger)))
@@ -537,6 +560,8 @@ or a :with block containing :mode/:interpreter/:magic is present."
            buckets :config-pre `(require ',feature))))
 
       ;; :trigger - autoloads, :mode, :magic, :interpreter
+      ;; all-modes/all-magics/all-interpreters include entries from :with blocks,
+      ;; all-bindings includes :bind from :with blocks for autoload extraction.
       (let ((tl (rapid-package--tl-new))
             (seen-autoloads (make-hash-table :test 'eq)))
         (cl-flet ((emit-autoload! (sym)
@@ -547,37 +572,36 @@ or a :with block containing :mode/:interpreter/:magic is present."
                              (autoload ',sym ,(symbol-name pkg-name) nil t))))))
           (dolist (cmd commands)
             (emit-autoload! cmd))
-          (when bindings
+          (when all-bindings
             (rapid-package--codegen-traverse-bindings
-             bindings
+             all-bindings
              (lambda (_key cmd _doc _map)
                (emit-autoload! (rapid-package--codegen-normalize-cmd cmd)))))
-          (dolist (entry modes)
+          (dolist (entry all-modes)
             (let ((pat  (plist-get entry :pattern))
                   (mode (plist-get entry :mode)))
               (emit-autoload! mode)
               (rapid-package--tl-append! tl `(add-to-list 'auto-mode-alist '(,pat . ,mode)))))
-          (dolist (entry magics)
+          (dolist (entry all-magics)
             (let ((pat  (plist-get entry :magic))
                   (mode (plist-get entry :mode)))
               (emit-autoload! mode)
               (rapid-package--tl-append! tl `(add-to-list 'magic-mode-alist '(,pat . ,mode)))))
-          (dolist (entry interpreters)
+          (dolist (entry all-interpreters)
             (let ((interp (plist-get entry :interpreter))
                   (mode   (plist-get entry :mode)))
               (emit-autoload! mode)
               (rapid-package--tl-append!
-               tl `(add-to-list 'interpreter-mode-alist '(,interp . ,mode)))))
-          (rapid-package--tl-extend!
-           tl (rapid-package--codegen-with-trigger-forms with-blocks pkg-name seen-autoloads)))
+               tl `(add-to-list 'interpreter-mode-alist '(,interp . ,mode))))))
         (rapid-package--tl-concat! (plist-get buckets :trigger) tl))
 
       ;; :bind - split global vs keymap-local placement
-      (when bindings
+      ;; all-bindings includes :bind from :with blocks (normalized to top-level groups).
+      (when all-bindings
         (let ((global-tl (rapid-package--tl-new))
               (map-tl    (rapid-package--tl-new)))
           (rapid-package--codegen-traverse-bindings
-           bindings
+           all-bindings
            (lambda (key cmd _doc keymap)
              (let ((key      (rapid-package--codegen-normalize-key key))
                    (cmd-sym  (rapid-package--codegen-normalize-cmd cmd)))
@@ -597,7 +621,7 @@ or a :with block containing :mode/:interpreter/:magic is present."
         (rapid-package--tl-extend! tl (rapid-package--codegen-custom-face-forms custom-faces))
         (rapid-package--tl-extend! tl (rapid-package--codegen-bind-forms bindings* t))
         (rapid-package--tl-extend! tl (rapid-package--codegen-bind-keymap-forms bind-keymaps))
-        (rapid-package--tl-extend! tl (rapid-package--codegen-unbind-forms unbind-keys))
+        (rapid-package--tl-extend! tl (rapid-package--codegen-unbind-forms all-unbinds))
         (rapid-package--tl-extend! tl (rapid-package--codegen-hook-forms hooks))
         (rapid-package--tl-extend! tl (rapid-package--codegen-with-forms with-blocks pkg-name "rapid-package--with"))
         (when diminish-mode
@@ -695,7 +719,13 @@ Condition wrapping is handled by the caller (`rapid-package--expand-conf')."
         (env-pairs              (plist-get p :env))
         (env-path-entries       (plist-get p :env-path)))
 
-    (let* ((buckets      (rapid-package--codegen-bucket-new '(:init :body)))
+    ;; Normalize :with subforms to top-level equivalents at codegen time.
+    (let* ((all-modes        (append modes        (rapid-package--with-expand-modes with-blocks)))
+           (all-interpreters (append interpreters (rapid-package--with-expand-interpreters with-blocks)))
+           (all-magics       (append magics       (rapid-package--with-expand-magics with-blocks)))
+           (all-bindings     (append bindings     (rapid-package--with-expand-bindings with-blocks)))
+           (all-unbinds      (append unbind-keys  (rapid-package--with-expand-unbinds with-blocks)))
+           (buckets      (rapid-package--codegen-bucket-new '(:init :body)))
            (bucket-order '(:init :body)))
 
       ;; :init bucket
@@ -741,20 +771,19 @@ Condition wrapping is handled by the caller (`rapid-package--expand-conf')."
           (rapid-package--tl-extend! body-tl (rapid-package--codegen-custom-forms custom-pairs))
           (rapid-package--tl-extend! body-tl (rapid-package--codegen-custom-face-forms custom-faces))
           (rapid-package--tl-extend! body-tl (rapid-package--codegen-hook-forms hooks))
-          (rapid-package--tl-extend! body-tl (rapid-package--codegen-bind-forms bindings))
-          (rapid-package--tl-extend! body-tl (rapid-package--codegen-unbind-forms unbind-keys))
+          (rapid-package--tl-extend! body-tl (rapid-package--codegen-bind-forms all-bindings))
+          (rapid-package--tl-extend! body-tl (rapid-package--codegen-unbind-forms all-unbinds))
           (rapid-package--tl-extend! body-tl (rapid-package--codegen-with-forms with-blocks cat "rapid-package--with-conf"))
-          (rapid-package--tl-extend! body-tl (rapid-package--codegen-with-trigger-forms with-blocks cat))
-          ;; :mode, :interpreter, :magic
-          (dolist (entry modes)
+          ;; :mode, :interpreter, :magic - all-* includes entries from :with blocks.
+          (dolist (entry all-modes)
             (let ((pat  (plist-get entry :pattern))
                   (mode (plist-get entry :mode)))
               (rapid-package--tl-append! body-tl `(add-to-list 'auto-mode-alist '(,pat . ,mode)))))
-          (dolist (entry interpreters)
+          (dolist (entry all-interpreters)
             (let ((interp (plist-get entry :interpreter))
                   (mode   (plist-get entry :mode)))
               (rapid-package--tl-append! body-tl `(add-to-list 'interpreter-mode-alist '(,interp . ,mode)))))
-          (dolist (entry magics)
+          (dolist (entry all-magics)
             (let ((pat  (plist-get entry :magic))
                   (mode (plist-get entry :mode)))
               (rapid-package--tl-append! body-tl `(add-to-list 'magic-mode-alist '(,pat . ,mode)))))
