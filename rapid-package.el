@@ -281,6 +281,13 @@ error messages.")
 
 Corresponds to `rapid-package--loading-file'.")
 
+(defsubst rapid-package--loc ()
+  "Return \"FILE:LINE: \" prefix when location context is set, else \"\"."
+  (if rapid-package--loading-file
+      (format "%s:%d: " rapid-package--loading-file
+              (or rapid-package--loading-line 0))
+    ""))
+
 ;;; Schemas
 
 (defvar rapid-package-schema
@@ -1204,8 +1211,10 @@ loads skip this work."
 
       (rapid-package--message 'json "Importing JSON: %s"
                               (file-name-nondirectory source-file))
-      (let* ((json-data (rapid-package--read-json source-file))
-             (forms     (rapid-package--process-items json-data)))
+      (let* ((result     (rapid-package--read-json source-file))
+             (json-data  (car result))
+             (item-lines (cdr result))
+             (forms      (rapid-package--process-items json-data source-file item-lines)))
         ;; forms already eval'd item-by-item inside process-items;
         ;; compile them to cache so the next load can skip this work.
         (unless (rapid-package--compile-to-cache forms cache-elc)
@@ -1216,8 +1225,11 @@ loads skip this work."
         (rapid-package--message 'json "Imported and loaded: %s"
                                 (file-name-nondirectory source-file))))))
 
-(defun rapid-package--process-items (json-data)
+(defun rapid-package--process-items (json-data file item-lines)
   "Process the items array from JSON-DATA one item at a time.
+
+FILE is the source JSON file path used for error messages.  ITEM-LINES is a
+vector of line numbers for each item, as returned by `rapid-package--read-json'.
 
 Each item is fully processed in sequence:
   1. JSON decode (already done - item is a hash table)
@@ -1238,7 +1250,9 @@ Returns the list of expanded forms (for writing to .elc cache)."
 
     (dotimes (i (length items))
       (let* ((item (aref items i))
-             (type (gethash "type" item)))
+             (type (gethash "type" item))
+             (rapid-package--loading-file file)
+             (rapid-package--loading-line (aref item-lines i)))
         (pcase type
           ("package"
            (let* ((plist     (rapid-package--json-to-parsed item))
@@ -1261,7 +1275,8 @@ Returns the list of expanded forms (for writing to .elc cache)."
              (rapid-package--tl-append! forms form)))
 
           (_ (rapid-package--warning 'json
-                                     "Unknown item type at index %d: %s" i type)))))
+                                     "%sunknown item type: %s"
+                                     (rapid-package--loc) type)))))
 
     (rapid-package--tl-value forms)))
 
@@ -2062,8 +2077,8 @@ Returns a plist in the same format as `rapid-package-dsl-parse'."
            (name-str (gethash head-key json-obj))
            (desc     (gethash "description" json-obj)))
       (unless (stringp name-str)
-        (rapid-package--abort 'json "Missing or invalid '%s' field in JSON (expected string, got %S)"
-                              head-key name-str))
+        (rapid-package--abort 'json "%smissing or invalid '%s' field (expected string, got %S)"
+                              (rapid-package--loc) head-key name-str))
       (setq plist (plist-put plist :_head
                              (if desc (list (intern name-str) desc)
                                (list (intern name-str))))))
@@ -2072,7 +2087,10 @@ Returns a plist in the same format as `rapid-package-dsl-parse'."
 (defun rapid-package--read-json (file)
   "Read and parse JSON FILE.
 
-Returns a hash table with the parsed JSON data."
+Returns (DATA . ITEM-LINES) where DATA is a hash table with the parsed JSON
+data, and ITEM-LINES is a vector of line numbers for each item in the items
+array.  Line numbers are best-effort: minified JSON will report line 1 for
+all items."
   (with-temp-buffer
     (insert-file-contents file)
     (goto-char (point-min))
@@ -2081,7 +2099,21 @@ Returns a hash table with the parsed JSON data."
           (json-key-type 'string)
           (json-false :json-false)
           (json-null :json-null))
-      (json-read))))
+      (let* ((data  (json-read))
+             (items (gethash "items" data))
+             (n     (if items (length items) 0))
+             (lines (make-vector n 0)))
+        (when (> n 0)
+          (goto-char (point-min))
+          (when (re-search-forward "\"items\"[ \t\n\r]*:[ \t\n\r]*\\[" nil t)
+            (skip-chars-forward " \t\n\r")
+            (let ((i 0))
+              (while (and (< i n) (not (looking-at "\\]")))
+                (aset lines i (line-number-at-pos (point)))
+                (json-read)
+                (setq i (1+ i))
+                (skip-chars-forward " \t\n\r,")))))
+        (cons data lines)))))
 
 ;;; User Commands (Cache Management)
 
