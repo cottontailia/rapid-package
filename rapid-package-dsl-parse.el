@@ -84,7 +84,7 @@ Lambda forms are rejected.  CONTEXT is used in the error message."
          (null (cddr raw-fn)))
     (cadr raw-fn))
    (t
-    (error "DSL syntax error: %s function must be a symbol or #\\='SYMBOL, got: %S"
+    (error "syntax error: %s function must be a symbol or #\\='SYMBOL, got: %S"
            context raw-fn))))
 
 (defun rapid-package-dsl--normalize-hook (entry)
@@ -107,7 +107,7 @@ Returns:
            (fn     (rapid-package-dsl--normalize-fn raw-fn ":hook")))
       (list :mode (car entry) :function fn)))
    (t
-    (error "DSL syntax error: invalid hook entry: %S" entry))))
+    (error "syntax error: invalid hook entry: %S" entry))))
 
 ;;; Group-list Infrastructure (used by :bind and :unbind parsers)
 
@@ -116,7 +116,7 @@ Returns:
 MAPS may be a single symbol or a list of symbols."
   (let ((rest (cdr item)) maps)
     (unless rest
-      (error "DSL syntax error: :map requires at least one keymap"))
+      (error "syntax error: :map requires at least one keymap"))
     (cond
      ((and (listp (car rest)) (cl-every #'symbolp (car rest)))
       (setq maps (pop rest)))
@@ -125,7 +125,7 @@ MAPS may be a single symbol or a list of symbols."
         (push (pop rest) maps))
       (setq maps (nreverse maps)))
      (t
-      (error "DSL syntax error: invalid :map specification: %S" item)))
+      (error "syntax error: invalid :map specification: %S" item)))
     (cons maps rest)))
 
 (defun rapid-package-dsl--find-or-create-group (group-tl maps bindings-key)
@@ -192,7 +192,7 @@ item via `rapid-package-dsl--finalize-groups'."
 
          (add-binding (maps b)
            (unless (binding-p b)
-             (error "DSL syntax error: invalid :bind entry %S" b))
+             (error "syntax error: invalid :bind entry %S" b))
            (let* ((normalized (rapid-package-dsl--normalize-binding b))
                   (raw-cmd    (plist-get normalized :command))
                   ;; Normalize command:
@@ -210,7 +210,7 @@ item via `rapid-package-dsl--finalize-groups'."
                               (null (cddr raw-cmd)))
                          (cadr raw-cmd))
                         (t
-                         (error "DSL syntax error: :bind command must be a symbol, #\\='SYMBOL, or string: %S"
+                         (error "syntax error: :bind command must be a symbol, #\\='SYMBOL, or string: %S"
                                 raw-cmd))))
                   (group (rapid-package-dsl--find-or-create-group
                           groups (or maps '()) :bind)))
@@ -222,10 +222,10 @@ item via `rapid-package-dsl--finalize-groups'."
            (pcase-let* ((`(,maps . ,rest)
                          (rapid-package-dsl--parse-map-spec map-form)))
              (unless rest
-               (error "DSL syntax error: :map requires at least one binding"))
+               (error "syntax error: :map requires at least one binding"))
              (dolist (b rest)
                (when (and (consp b) (eq (car b) :map))
-                 (error "DSL syntax error: nested :map not allowed"))
+                 (error "syntax error: nested :map not allowed"))
                (add-binding maps b))))
 
          (consume-container (lst)
@@ -236,7 +236,7 @@ item via `rapid-package-dsl--finalize-groups'."
               ((binding-p elem)
                (add-binding '() elem))
               (t
-               (error "DSL syntax error: invalid :bind entry: %S" lst))))))
+               (error "syntax error: invalid :bind entry: %S" lst))))))
 
       (cond
        ((and (consp item) (eq (car item) :map))
@@ -246,7 +246,7 @@ item via `rapid-package-dsl--finalize-groups'."
        ((listp item)
         (consume-container item))
        (t
-        (error "DSL syntax error: invalid :bind entry: %S" item)))
+        (error "syntax error: invalid :bind entry: %S" item)))
 
       (cons groups args))))
 
@@ -277,7 +277,7 @@ Insertion order of both groups and keys is preserved."
 
          (add-key (maps key)
            (unless (valid-key-p key)
-             (error "DSL syntax error: invalid :unbind entry %S" key))
+             (error "syntax error: invalid :unbind entry %S" key))
            (let ((group (rapid-package-dsl--find-or-create-group
                          groups (or maps '()) :unbind)))
              (rapid-package--tl-append! (plist-get group :unbind) key))))
@@ -287,10 +287,10 @@ Insertion order of both groups and keys is preserved."
         (pcase-let* ((`(,maps . ,rest)
                       (rapid-package-dsl--parse-map-spec item)))
           (unless rest
-            (error "DSL syntax error: :map requires at least one key"))
+            (error "syntax error: :map requires at least one key"))
           (dolist (k rest)
             (when (and (consp k) (eq (car k) :map))
-              (error "DSL syntax error: nested :map not allowed"))
+              (error "syntax error: nested :map not allowed"))
             (add-key maps k))))
 
        ((and (listp item)
@@ -302,7 +302,7 @@ Insertion order of both groups and keys is preserved."
         (add-key '() item))
 
        (t
-        (error "DSL syntax error: invalid :unbind entry %S" item)))
+        (error "syntax error: invalid :unbind entry %S" item)))
 
       (cons groups args))))
 
@@ -355,7 +355,7 @@ IR: a flat list of entry plists after finalization:
         (add-entry item))
 
        (t
-        (error "DSL syntax error: invalid :hook entry: %S" item))))
+        (error "syntax error: invalid :hook entry: %S" item))))
 
     (cons tl args)))
 
@@ -413,7 +413,7 @@ Each pair may be (VAR . VAL), (VAR VAL), or (VAR VAL \"DOC\")."
 ITEMS is the cdr of a (:local ...) or (:bind ...) subform.
 Signals an error on odd item count."
   (when (cl-oddp (length items))
-    (error "DSL syntax error: :with subform has odd number of items: %S" items))
+    (error "syntax error: :with subform has odd number of items: %S" items))
   (let ((tl (rapid-package--tl-new)))
     (while items
       (rapid-package--tl-append! tl (cons (pop items) (pop items))))
@@ -446,11 +446,11 @@ respectively.  The mode is inferred from the :with target symbol."
         (magic-patterns (rapid-package--tl-new)))
     (dolist (sub subforms)
       (unless (and (consp sub) (keywordp (car sub)))
-        (error "DSL syntax error: :with subform must start with a keyword, got: %S" sub))
+        (error "syntax error: :with subform must start with a keyword, got: %S" sub))
       (pcase (car sub)
         (:local
          (when (eq kind :map)
-           (error "DSL syntax error: :with :local is not allowed for a keymap (*-map) symbol: %S"
+           (error "syntax error: :with :local is not allowed for a keymap (*-map) symbol: %S"
                   mode-sym))
          (let* ((rest (cdr sub))
                 (pairs (if (and rest (consp (car rest)) (cl-every #'consp rest))
@@ -461,17 +461,17 @@ respectively.  The mode is inferred from the :with target symbol."
                                       (rapid-package-dsl--with-normalize-local pairs))))
         (:hook
          (when (eq kind :map)
-           (error "DSL syntax error: :with :hook is not allowed for a keymap (*-map) symbol: %S"
+           (error "syntax error: :with :hook is not allowed for a keymap (*-map) symbol: %S"
                   mode-sym))
          (let ((fns (cdr sub)))
            (unless fns
-             (error "DSL syntax error: :with :hook requires at least one function symbol"))
+             (error "syntax error: :with :hook requires at least one function symbol"))
            (dolist (fn fns)
              (rapid-package--tl-append! call-fns
                                         (rapid-package-dsl--normalize-fn fn ":with :hook")))))
         (:bind
          (when (eq kind :hook)
-           (error "DSL syntax error: :with :bind is not allowed for a hook (*-hook) symbol: %S"
+           (error "syntax error: :with :bind is not allowed for a hook (*-hook) symbol: %S"
                   mode-sym))
          (let* ((rest (cdr sub))
                 (pairs (if (and rest (consp (car rest)) (cl-every #'consp rest))
@@ -492,13 +492,13 @@ respectively.  The mode is inferred from the :with target symbol."
                                          (null (cddr raw-cmd)))
                                     (cadr raw-cmd))
                                    (t
-                                    (error "DSL syntax error: :with :bind command must be a symbol, #\\'SYMBOL, or string: %S"
+                                    (error "syntax error: :with :bind command must be a symbol, #\\'SYMBOL, or string: %S"
                                            raw-cmd)))))
                         (plist-put normalized :command cmd)))
                     pairs))))
         (:unbind
          (when (eq kind :hook)
-           (error "DSL syntax error: :with :unbind is not allowed for a hook (*-hook) symbol: %S"
+           (error "syntax error: :with :unbind is not allowed for a hook (*-hook) symbol: %S"
                   mode-sym))
          (let* ((rest (cdr sub))
                 (keys (cond
@@ -509,30 +509,30 @@ respectively.  The mode is inferred from the :with target symbol."
                        ((cl-every (lambda (k) (or (stringp k) (vectorp k))) rest)
                         rest)
                        (t
-                        (error "DSL syntax error: :with :unbind keys must be strings or vectors: %S"
+                        (error "syntax error: :with :unbind keys must be strings or vectors: %S"
                                rest)))))
            ;; keys might reference existing data (car rest or rest), must copy
            (rapid-package--tl-extend! unbind-keys (copy-sequence keys))))
         (:mode
          (when (memq kind '(:hook :map))
-           (error "DSL syntax error: :with :mode is not allowed for a %s symbol: %S"
+           (error "syntax error: :with :mode is not allowed for a %s symbol: %S"
                   (if (eq kind :hook) "hook (*-hook)" "keymap (*-map)")
                   mode-sym))
          (rapid-package--tl-extend! mode-patterns (cdr sub)))
         (:interpreter
          (when (memq kind '(:hook :map))
-           (error "DSL syntax error: :with :interpreter is not allowed for a %s symbol: %S"
+           (error "syntax error: :with :interpreter is not allowed for a %s symbol: %S"
                   (if (eq kind :hook) "hook (*-hook)" "keymap (*-map)")
                   mode-sym))
          (rapid-package--tl-extend! interpreter-patterns (cdr sub)))
         (:magic
          (when (memq kind '(:hook :map))
-           (error "DSL syntax error: :with :magic is not allowed for a %s symbol: %S"
+           (error "syntax error: :with :magic is not allowed for a %s symbol: %S"
                   (if (eq kind :hook) "hook (*-hook)" "keymap (*-map)")
                   mode-sym))
          (rapid-package--tl-extend! magic-patterns (cdr sub)))
         (_
-         (error "DSL syntax error: unknown :with subform keyword %S" (car sub)))))
+         (error "syntax error: unknown :with subform keyword %S" (car sub)))))
     (list :local (rapid-package--tl-value local-pairs)
           :calls (rapid-package--tl-value call-fns)
           :bind (rapid-package--tl-value bind-pairs)
@@ -609,7 +609,7 @@ IR per block:
            (symbolp (caar item)))
       (dolist (block item)
         (unless (and (consp block) (symbolp (car block)))
-          (error "DSL syntax error: :with canonical block must start with a mode symbol: %S" block))
+          (error "syntax error: :with canonical block must start with a mode symbol: %S" block))
         (let* ((block    (copy-sequence block))
                (mode-sym (pop block))
                (id-sym   (and block
@@ -637,7 +637,7 @@ IR per block:
          tl (rapid-package-dsl--with-parse-block mode-sym id-sym subforms))))
 
      (t
-      (error "DSL syntax error: :with expects a mode symbol or list of blocks, got: %S" item)))
+      (error "syntax error: :with expects a mode symbol or list of blocks, got: %S" item)))
 
     (cons tl args)))
 
@@ -653,7 +653,7 @@ Bare strings and symbols are not accepted; mode must always be specified.
 Returns: (:pattern PATTERN :mode MODE [:description DOC])."
   (if (consp item)
       (rapid-package-dsl--normalize-pair item :pattern :mode)
-    (error "DSL syntax error: :mode entry must be (PATTERN MODE) or (PATTERN . MODE), got: %S" item)))
+    (error "syntax error: :mode entry must be (PATTERN MODE) or (PATTERN . MODE), got: %S" item)))
 
 (defun rapid-package-dsl--normalize-interpreter-item (item)
   "Normalize an :interpreter ITEM to plist format.
@@ -665,7 +665,7 @@ Bare strings are not accepted; mode must always be specified.
 Returns: (:interpreter INTERPRETER :mode MODE [:description DOC])."
   (if (consp item)
       (rapid-package-dsl--normalize-pair item :interpreter :mode)
-    (error "DSL syntax error: :interpreter entry must be (INTERP MODE) or (INTERP . MODE), got: %S" item)))
+    (error "syntax error: :interpreter entry must be (INTERP MODE) or (INTERP . MODE), got: %S" item)))
 
 (defun rapid-package-dsl--normalize-magic-item (item)
   "Normalize a :magic ITEM to plist format.
@@ -677,7 +677,7 @@ Bare strings are not accepted; mode must always be specified.
 Returns: (:magic MAGIC :mode MODE [:description DOC])."
   (if (consp item)
       (rapid-package-dsl--normalize-pair item :magic :mode)
-    (error "DSL syntax error: :magic entry must be (MAGIC MODE) or (MAGIC . MODE), got: %S" item)))
+    (error "syntax error: :magic entry must be (MAGIC MODE) or (MAGIC . MODE), got: %S" item)))
 
 (defun rapid-package-dsl-parse-mode (item args _current-key current-acc)
   "Parse a :mode ITEM and accumulate into CURRENT-ACC.
@@ -741,7 +741,7 @@ VAR must be a string.  VALUE must be a string, nil, or a `,EXPR' unquote
 form.  nil means unset the variable.  `,EXPR' is evaluated at runtime.
 Returns: (:variable VAR :value VALUE [:description DOC])."
   (unless (and (consp entry) (stringp (car entry)))
-    (error "DSL syntax error: :env variable name must be a string, got: %S" entry))
+    (error "syntax error: :env variable name must be a string, got: %S" entry))
   (let ((var (car entry))
         (rest (cdr entry)))
     (cond
@@ -763,7 +763,7 @@ Returns: (:variable VAR :value VALUE [:description DOC])."
      ((and rest (null (cdr rest)))
       (list :variable var :value (rapid-package-dsl-quote (car rest))))
 
-     (t (error "DSL syntax error: invalid :env entry format: %S" entry)))))
+     (t (error "syntax error: invalid :env entry format: %S" entry)))))
 
 (defun rapid-package-dsl-parse-env (item args _current-key current-acc)
   "Parse an :env ITEM and accumulate into CURRENT-ACC.
@@ -794,7 +794,7 @@ Returns (NEW-ACC . REMAINING-ARGS)."
        tl (rapid-package-dsl--normalize-env-item item)))
 
      (t
-      (error "DSL syntax error: invalid :env value: %S" item)))
+      (error "syntax error: invalid :env value: %S" item)))
 
     (cons tl args)))
 
@@ -838,22 +838,22 @@ Returns a single normalized plist."
          (eq (car item) :map))
     (let ((rest (cdr item)))
       (unless (and rest (symbolp (car rest)))
-        (error "DSL syntax error: :env-path :map requires a symbol (env var name), got: %S"
+        (error "syntax error: :env-path :map requires a symbol (env var name), got: %S"
                (car rest)))
       (let ((var-name (symbol-name (pop rest))))
         (unless (memq (car rest) '(:prepend :append))
-          (error "DSL syntax error: :env-path :map requires :prepend or :append, got: %S"
+          (error "syntax error: :env-path :map requires :prepend or :append, got: %S"
                  (car rest)))
         (let ((op (pop rest)))
           (unless (and rest (rapid-package-dsl--env-path-dir-p (car rest)))
-            (error "DSL syntax error: :env-path dir must be a string or ,EXPR, got: %S"
+            (error "syntax error: :env-path dir must be a string or ,EXPR, got: %S"
                    (car rest)))
           (list :var var-name
                 :dir (rapid-package-dsl-quote (car rest))
                 :op  op)))))
 
    (t
-    (error "DSL syntax error: invalid :env-path entry: %S" item))))
+    (error "syntax error: invalid :env-path entry: %S" item))))
 
 (defun rapid-package-dsl-parse-env-path (item args _current-key current-acc)
   "Parse a :env-path ITEM and accumulate into CURRENT-ACC.
