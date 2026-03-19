@@ -269,6 +269,18 @@ for registration purposes) vs. normal evaluation.
 
 Currently not used internally, but reserved for future extensions.")
 
+(defvar rapid-package--loading-file nil
+  "File path being processed by `rapid-package--expand-file', or nil.
+
+Non-nil only when a macro is being expanded as part of `rapid-package-load'
+processing a .el file.  Used to include file and line information in DSL
+error messages.")
+
+(defvar rapid-package--loading-line nil
+  "Line number of the form being expanded by `rapid-package--expand-file', or nil.
+
+Corresponds to `rapid-package--loading-file'.")
+
 ;;; Schemas
 
 (defvar rapid-package-schema
@@ -773,8 +785,15 @@ Example:
   (let* ((p (condition-case err
                 (rapid-package-dsl-parse (cons package args) rapid-package-schema)
               (error
-               (rapid-package--abort 'dsl "Parse error for %s: %s"
-                                     package (error-message-string err)))))
+               (if rapid-package--loading-file
+                   (rapid-package--abort 'dsl "%s:%d: %s: %s"
+                                         rapid-package--loading-file
+                                         rapid-package--loading-line
+                                         package
+                                         (error-message-string err))
+                 (rapid-package--abort 'dsl "%s: %s"
+                                       package
+                                       (error-message-string err))))))
          (head-parsed (rapid-package--parse-head (plist-get p :_head)))
          (pkg-name  (car head-parsed))
          (condition  (rapid-package--check-condition p)))
@@ -855,8 +874,15 @@ Example:
   (let* ((p (condition-case err
                 (rapid-package-dsl-parse (cons category args) rapid-package-conf-schema)
               (error
-               (rapid-package--abort 'dsl "Parse error for %s: %s"
-                                     category (error-message-string err)))))
+               (if rapid-package--loading-file
+                   (rapid-package--abort 'dsl "%s:%d: %s: %s"
+                                         rapid-package--loading-file
+                                         rapid-package--loading-line
+                                         category
+                                         (error-message-string err))
+                 (rapid-package--abort 'dsl "%s: %s"
+                                       category
+                                       (error-message-string err))))))
          (head-parsed (rapid-package--parse-head (plist-get p :_head)))
          (cat      (car head-parsed))
          (condition (rapid-package--check-condition p)))
@@ -1482,6 +1508,8 @@ Returns a list of expanded forms ready for compilation."
           (while (not (eobp))
             (let* ((form-start (point))
                    (form       (read (current-buffer)))
+                   (rapid-package--loading-file file)
+                   (rapid-package--loading-line (line-number-at-pos form-start))
                    (expanded   (rapid-package--maybe-expand form)))
               (condition-case eval-err
                   (eval expanded t)
