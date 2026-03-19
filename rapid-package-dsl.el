@@ -262,8 +262,7 @@ the head list for other accumulators."
 
            ;; Unknown keyword
            ((keywordp item)
-            (error "syntax error: unknown keyword %S. Allowed: %S"
-                   item (mapcar #'car schema)))
+            (error "syntax error: unknown keyword %S" item))
 
            ;; Value
            (t
