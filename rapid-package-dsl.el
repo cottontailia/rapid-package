@@ -102,7 +102,7 @@ Returns a plist:
                          (rapid-package-dsl-quote (cadr entry))
                        (cadr entry))))
 
-   (t (error "DSL syntax error: invalid entry format: %S" entry))))
+   (t (error "syntax error: invalid entry format: %S" entry))))
 
 (defun rapid-package-dsl--normalize-alist-item (item)
   "Normalize an alist ITEM to plist format.
@@ -209,11 +209,11 @@ the head list for other accumulators."
               (cond
                ((and (eq current-type 'single)
                      (not (plist-member result current-key)))
-                (error "DSL syntax error: keyword %S expects a value"
+                (error "syntax error: keyword %S expects a value"
                        current-key))
                ((and (memq current-type '(list body alist))
                      (not (plist-get result current-key)))
-                (error "DSL syntax error: keyword %S expects at least one value"
+                (error "syntax error: keyword %S expects at least one value"
                        (if (eq current-key :_head) "Initial position" current-key)))))
 
             (let ((type (cdr entry)))
@@ -257,18 +257,18 @@ the head list for other accumulators."
                 (cl-pushnew item function-keys))
 
                (t
-                (error "DSL internal error: unknown schema type %S for keyword %S"
+                (error "internal error: unknown schema type %S for keyword %S"
                        type item)))))
 
            ;; Unknown keyword
            ((keywordp item)
-            (error "DSL syntax error: unknown keyword %S. Allowed: %S"
+            (error "syntax error: unknown keyword %S. Allowed: %S"
                    item (mapcar #'car schema)))
 
            ;; Value
            (t
             (if (null current-key)
-                (error "DSL syntax error: unexpected value %S" item)
+                (error "syntax error: unexpected value %S" item)
               (cond
                ;; single: exactly one value, then reset state
                ((eq current-type 'single)
@@ -310,7 +310,7 @@ the head list for other accumulators."
                     (if (consp pair)
                         (append-to-key
                          (rapid-package-dsl--normalize-alist-item pair))
-                      (error "DSL syntax error: invalid entry for keyword %S: %S"
+                      (error "syntax error: invalid entry for keyword %S: %S"
                              current-key pair))))
 
                  ;; Single pair
@@ -323,7 +323,7 @@ the head list for other accumulators."
                   (append-to-key (list :variable item :value nil)))
 
                  (t
-                  (error "DSL syntax error: invalid entry for keyword %S: %S"
+                  (error "syntax error: invalid entry for keyword %S: %S"
                          current-key item))))
 
                ;; Custom parser: extract parser-fn from cons or bare function,
@@ -342,7 +342,7 @@ the head list for other accumulators."
                   (setq result (plist-put result current-key new-acc))))
 
                (t
-                (error "DSL internal error: unknown type %S for keyword %S"
+                (error "internal error: unknown type %S for keyword %S"
                        current-type current-key))))))))
 
       ;; Final validation
@@ -350,11 +350,11 @@ the head list for other accumulators."
         (cond
          ((and (eq current-type 'single)
                (not (plist-member result current-key)))
-          (error "DSL syntax error: keyword %S requires a value, but input ended"
+          (error "syntax error: keyword %S requires a value, but input ended"
                  current-key))
          ((and (memq current-type '(list body alist))
                (not (plist-get result current-key)))
-          (error "DSL syntax error: keyword %S requires at least one value"
+          (error "syntax error: keyword %S requires at least one value"
                  (if (eq current-key :_head) :initial-position current-key)))))
 
       ;; Finalize custom-parser keys.
