@@ -267,7 +267,7 @@ the head list for other accumulators."
            ;; Value
            (t
             (if (null current-key)
-                (error "syntax error: unexpected value %S" item)
+                (error "syntax error: unexpected value %S — must be preceded by a keyword" item)
               (cond
                ;; single: exactly one value, then reset state
                ((eq current-type 'single)

@@ -210,7 +210,7 @@ item via `rapid-package-dsl--finalize-groups'."
                               (null (cddr raw-cmd)))
                          (cadr raw-cmd))
                         (t
-                         (error "syntax error: :bind command must be a symbol, #\\='SYMBOL, or string: %S"
+                         (error "syntax error: :bind command must be a symbol, #'SYMBOL, or string: %S"
                                 raw-cmd))))
                   (group (rapid-package-dsl--find-or-create-group
                           groups (or maps '()) :bind)))
@@ -492,7 +492,7 @@ respectively.  The mode is inferred from the :with target symbol."
                                          (null (cddr raw-cmd)))
                                     (cadr raw-cmd))
                                    (t
-                                    (error "syntax error: :with :bind command must be a symbol, #\\'SYMBOL, or string: %S"
+                                    (error "syntax error: :with :bind command must be a symbol, #'SYMBOL, or string: %S"
                                            raw-cmd)))))
                         (plist-put normalized :command cmd)))
                     pairs))))
