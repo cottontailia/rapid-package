@@ -450,7 +450,7 @@ Example:
                   ('conf    'rapid-package-conf-schema)
                   ('both    'both)
                   (_ (rapid-package--abort 'extension
-                                           "Invalid :for value %S. Use \\='package, \\='conf, or \\='both"
+                                           "invalid for argument %S (expected 'package, 'conf, or 'both)"
                                            for)))))
     (if (eq schema 'both)
         (progn
@@ -541,11 +541,11 @@ Example:
            (expander  (plist-get args :expander)))
       (unless expander
         (rapid-package--abort 'extension
-                              "rapid-package-add-expander: :expander is required"))
+                              ":expander argument is required for keyword %S" keyword))
       (unless (functionp expander)
         (rapid-package--abort 'extension
-                              "rapid-package-add-expander: :expander must be a function, got %S"
-                              expander))
+                              ":expander must be a function for keyword %S, got %S"
+                              keyword expander))
       ;; Remove existing expander for same keyword+for to ensure idempotency
       (setq rapid-package--expanders
             (cl-remove-if (lambda (entry)
@@ -1098,7 +1098,10 @@ Expands to:
     :config
     (setq magit-use-gui-features t))"
   (declare (indent defun))
-  (let* ((pkg-name (if (symbolp package) package (error "PACKAGE must be a symbol")))
+  (let* ((pkg-name (if (symbolp package) package
+                     (rapid-package--abort 'api
+                                           "package argument must be a symbol, got: %S"
+                                           package)))
          (suffix (rapid-package-after--build-category-suffix args))
          (category (intern (concat "after-" (symbol-name pkg-name) suffix))))
     `(rapid-package-conf ,category
@@ -1275,7 +1278,7 @@ Returns the list of expanded forms (for writing to .elc cache)."
              (rapid-package--tl-append! forms form)))
 
           (_ (rapid-package--warning 'json
-                                     "%sunknown item type: %s"
+                                     "%sunknown item type: %s (expected \"package\" or \"config\")"
                                      (rapid-package--loc) type)))))
 
     (rapid-package--tl-value forms)))
@@ -1534,7 +1537,7 @@ Returns a list of expanded forms ready for compilation."
                                   form-start
                                   (min (+ form-start 60) (point-max)))))
                    (rapid-package--abort 'eval
-                                         "Error in %s at line %d: %s\n  Near: %s"
+                                         "%s:%d: %s\n  Near: %s"
                                          file line (error-message-string eval-err)
                                          (string-trim excerpt)))))
               (rapid-package--tl-append! forms expanded)))
@@ -1546,7 +1549,7 @@ Returns a list of expanded forms ready for compilation."
                           (min (+ (line-beginning-position) 60)
                                (point-max)))))
            (rapid-package--abort 'parse
-                                 "Error in %s at line %d: %s\n  Near: %s"
+                                 "%s:%d: %s\n  Near: %s"
                                  file line (error-message-string err)
                                  (string-trim excerpt))))))
     (rapid-package--tl-value forms)))
