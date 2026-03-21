@@ -50,17 +50,24 @@
   "Custom DSL parser for :rules entries.
 Handles both container-list ((TARGET FONT ...) ...) and single-entry
 \(TARGET FONT ...) forms.
-Returns (NEW-ACC . REMAINING-ARGS)."
+Returns (NEW-ACC . REMAINING-ARGS).
+Each parsed entry is stored as a plist (:target TARGET :font FONT :op OP)."
   (let ((tl (or current-acc (rapid-package--tl-new))))
     (cond
      ;; Container list: ((TARGET FONT) (TARGET FONT) ...)
      ((and (listp item) (consp (car item)) (not (keywordp (car item))))
       (dolist (entry item)
-        (rapid-package--tl-append! tl entry))
+        (rapid-package--tl-append! tl
+                                   (list :target (car entry)
+                                         :font   (cadr entry)
+                                         :op     (or (caddr entry) 'prepend))))
       (cons tl args))
      ;; Single entry: (TARGET FONT) or (TARGET FONT OP)
      ((consp item)
-      (rapid-package--tl-append! tl item)
+      (rapid-package--tl-append! tl
+                                 (list :target (car item)
+                                       :font   (cadr item)
+                                       :op     (or (caddr item) 'prepend)))
       (cons tl args))
      (t
       (error "syntax error: invalid :rules entry: %S" item)))))
@@ -79,7 +86,7 @@ Returns (NEW-ACC . REMAINING-ARGS)."
   "Generate the fontset setup form for NAME.
 BASE is the base font string or unquote form.
 SIZE is an optional numeric size.
-RULES is the list of (TARGET FONT &optional OP) entries.
+RULES is the list of (:target TARGET :font FONT :op OP) plists.
 RESCALE is the list of (FONT-REGEXP RATIO) entries or nil.
 DEFAULT-P is non-nil to set this fontset as the default face font.
 VARIABLE is an optional list of (SYMBOL EXPR) let* bindings."
@@ -92,10 +99,9 @@ VARIABLE is an optional list of (SYMBOL EXPR) let* bindings."
          (rule-forms
           (mapcar
            (lambda (rule)
-             (let* ((target (car rule))
-                    (font   (rapid-package--codegen-unquote (cadr rule)))
-                    (op     (and (cddr rule) (caddr rule)))
-                    (add    (pcase (or op 'prepend)
+             (let* ((target (plist-get rule :target))
+                    (font   (rapid-package--codegen-unquote (plist-get rule :font)))
+                    (add    (pcase (plist-get rule :op)
                               ('prepend ''prepend)
                               ('append  ''append)
                               ('replace 'nil))))
@@ -376,115 +382,13 @@ NAME is a symbol; the generated fontset is named \"fontset-NAME\".
 
 ;;; Fontset JSON
 
-(defun rapid-package-fontset--encode-target (target)
-  "Encode TARGET to a JSON-safe value.
-Uses `rapid-package-json--normalize-lisp-value' for parity with
-other rapid-package JSON value conversions."
-  (rapid-package-json--normalize-lisp-value target))
-
-(defun rapid-package-fontset--decode-target (json-target)
-  "Decode JSON-TARGET back to an Elisp TARGET value."
-  (let ((decoded (rapid-package-json--denormalize-lisp-value json-target)))
-    (if (or (symbolp decoded)
-            (integerp decoded)
-            (and (consp decoded)
-                 (integerp (car decoded))
-                 (integerp (cdr decoded))))
-        decoded
-      (rapid-package--abort 'json "cannot decode fontset target: %S" json-target))))
-
-(defun rapid-package-fontset--json-encode-rules (rules)
-  "Encode fontset RULES list to a JSON vector of hash-tables.
-Each rule is a (TARGET FONT [OP]) tuple.  OP defaults to `prepend'."
-  (vconcat
-   (mapcar (lambda (rule)
-             (let ((h (make-hash-table :test 'equal)))
-               (puthash "target"
-                        (rapid-package-fontset--encode-target (car rule))
-                        h)
-               (puthash "font"
-                        (rapid-package-json--normalize-lisp-value (cadr rule))
-                        h)
-               (puthash "op"
-                        (symbol-name (or (and (cddr rule) (caddr rule))
-                                         'prepend))
-                        h)
-               h))
-           rules)))
-
-(defun rapid-package-fontset--json-encode-rescale (rescale)
-  "Encode fontset RESCALE list to a JSON vector of 2-element vectors.
-Each entry is an alist-type plist (:variable FONT-REGEXP :value SCALE)."
-  (vconcat
-   (mapcar (lambda (entry)
-             (vector (rapid-package-json--normalize-lisp-value
-                      (plist-get entry :variable))
-                     (rapid-package-json--normalize-lisp-value
-                      (plist-get entry :value))))
-           rescale)))
-
-(defun rapid-package-fontset--json-encode-base (base)
-  "Encode fontset BASE font value to a JSON-safe string.
-Applies `rapid-package-json--normalize-lisp-value' directly so that a
-quoted form such as \\='(quote \"Roboto Mono\") is stored as the bare string
-\\='\"Roboto Mono\"\\=' rather than as a vector."
-  (rapid-package-json--normalize-lisp-value base))
-
-(defun rapid-package-fontset--json-encode-default (val)
-  "Encode fontset :default flag VAL to a JSON boolean.
-Always emits t or :json-false so that nil (not default) is preserved
-in JSON round-trips without relying on `rapid-package-json--is-flag-p'."
-  (if val t :json-false))
-
-(defconst rapid-package-fontset--json-encoders
-  '((:base     . rapid-package-fontset--json-encode-base)
-    (:rules    . rapid-package-fontset--json-encode-rules)
-    (:rescale  . rapid-package-fontset--json-encode-rescale)
-    (:default  . rapid-package-fontset--json-encode-default))
-  "Custom JSON encoders for fontset fields with nested structure.
-Used by `rapid-package-fontset--to-json' via
-`rapid-package--plist-to-json-generic'.")
-
-(defun rapid-package-fontset--json-decode-rules (json-val)
-  "Decode a JSON rules vector JSON-VAL into a fontset rules list.
-Each hash-table entry becomes a (TARGET FONT [OP]) tuple.
-The OP element is omitted when it equals the default `prepend'."
-  (when (vectorp json-val)
-    (mapcar (lambda (h)
-              (let* ((target (rapid-package-fontset--decode-target
-                              (gethash "target" h)))
-                     (font   (rapid-package-json--denormalize-lisp-value
-                              (gethash "font" h)))
-                     (op     (intern (gethash "op" h))))
-                (if (eq op 'prepend)
-                    (list target font)
-                  (list target font op))))
-            (append json-val nil))))
-
-(defun rapid-package-fontset--json-decode-rescale (json-val)
-  "Decode a JSON rescale vector JSON-VAL into a fontset rescale list.
-Each 2-element vector entry becomes an alist-type plist
-\(:variable FONT-REGEXP :value SCALE)."
-  (when (vectorp json-val)
-    (mapcar (lambda (entry)
-              (list :variable (rapid-package-json--denormalize-lisp-value
-                               (aref entry 0))
-                    :value    (rapid-package-json--denormalize-lisp-value
-                               (aref entry 1))))
-            (append json-val nil))))
-
-(defconst rapid-package-fontset--json-decoders
-  '((:rules    . rapid-package-fontset--json-decode-rules)
-    (:rescale  . rapid-package-fontset--json-decode-rescale))
-  "Custom JSON decoders for fontset fields with nested structure.
-Used by `rapid-package-fontset--from-json' via `rapid-package--json-to-parsed'.")
-
 (defun rapid-package-fontset--fill-json (data json-obj)
   "Fill JSON-OBJ with fontset DATA fields.
-Uses `rapid-package--plist-to-json-generic' with fontset-specific encoders.
-Does not set the \\\"type\\\" field; the caller is responsible for that."
+Uses `rapid-package--plist-to-json-generic' with fontset schema for
+flag detection (`:default') and IR type resolution (`:rules', `:rescale').
+Does not set the \"type\" field; the caller is responsible for that."
   (rapid-package--plist-to-json-generic
-   data "name" json-obj rapid-package-fontset--json-encoders))
+   data "name" json-obj nil rapid-package-fontset-schema))
 
 (defun rapid-package-fontset--to-json (data)
   "Serialize fontset IR plist DATA to a JSON hash-table.
@@ -501,14 +405,7 @@ The output shape matches the shared item contract used by
   "Deserialize a fontset JSON hash-table ITEM into fontset IR plist.
 ITEM is a hash-table as returned by `json-read'.
 Returns a plist compatible with `rapid-package-fontset--expand-from-data'."
-  (let ((plist (rapid-package--json-to-parsed item rapid-package-fontset--json-decoders)))
-    ;; :default is a fontset-specific flag not in shared schemas;
-    ;; rapid-package--json-to-parsed drops nil values for unrecognized
-    ;; flag keys, so read it directly from the JSON hash-table.
-    (let ((raw (gethash "default" item :absent)))
-      (unless (eq raw :absent)
-        (setq plist (plist-put plist :default (not (eq raw :json-false))))))
-    plist))
+  (rapid-package--json-to-parsed item nil rapid-package-fontset-schema))
 
 (provide 'rapid-package-fontset)
 

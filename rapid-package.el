@@ -1627,12 +1627,14 @@ Returns a list of (:type TYPE :data PARSED-PLIST) entries."
 
 ;;; JSON Conversion Helpers
 
-(defun rapid-package-json--get-field-type (key)
+(defun rapid-package-json--get-field-type (key &optional extra-schema)
   "Get the type of field KEY from schema.
-Checks `rapid-package-schema' and `rapid-package-conf-schema'.
+Checks `rapid-package-schema', `rapid-package-conf-schema', and
+optionally EXTRA-SCHEMA (a schema alist in the same format).
 Returns: body, ir, or lisp-value"
   (let ((schema-entry (or (assq key rapid-package-schema)
-                          (assq key rapid-package-conf-schema))))
+                          (assq key rapid-package-conf-schema)
+                          (and extra-schema (assq key extra-schema)))))
     (if schema-entry
         (let ((spec (cdr schema-entry)))
           (cond
@@ -1916,30 +1918,35 @@ Uses schema-based type detection."
         (rapid-package-json--normalize-lisp-value val)))
      (t (rapid-package-json--normalize-lisp-value val)))))
 
-(defun rapid-package-json--is-flag-p (key)
+(defun rapid-package-json--is-flag-p (key &optional extra-schema)
   "Return non-nil if KEY is a flag-type field in any known schema.
-Checks `rapid-package-schema' and `rapid-package-conf-schema'.
-Fontset-specific flag keys (e.g. `:default') are handled directly in
-`rapid-package-fontset--from-json' and `rapid-package-fontset--json-encoders'."
+Checks `rapid-package-schema', `rapid-package-conf-schema', and
+optionally EXTRA-SCHEMA (a schema alist in the same format)."
   (let ((schema-entry (or (assq key rapid-package-schema)
-                          (assq key rapid-package-conf-schema))))
+                          (assq key rapid-package-conf-schema)
+                          (and extra-schema (assq key extra-schema)))))
     (and schema-entry
          (eq (cdr schema-entry) 'flag))))
 
-(defun rapid-package-json--flag-aware-json-value (key val)
+(defun rapid-package-json--flag-aware-json-value (key val &optional schema)
   "Convert VAL to JSON value, preserving flag-type nil.
 For flag-type fields, nil is converted to :json-false to preserve
 information during JSON round-trip. For other fields, uses standard
-conversion via `rapid-package-json--field-json-value'."
-  (if (rapid-package-json--is-flag-p key)
+conversion via `rapid-package-json--field-json-value'.
+SCHEMA is an optional extra schema alist to check in addition to the
+global schemas."
+  (if (rapid-package-json--is-flag-p key schema)
       (if val t :json-false)
     (rapid-package-json--field-json-value key val)))
 
-(defun rapid-package--plist-to-json-generic (plist head-key json-obj &optional custom-encoders)
+(defun rapid-package--plist-to-json-generic (plist head-key json-obj
+                                                   &optional custom-encoders schema)
   "Serialize PLIST into JSON-OBJ using HEAD-KEY for the name field.
 CUSTOM-ENCODERS is an optional alist of (KEY . ENCODER-FN) pairs.
 When a key has a custom encoder, the encoder is called with the field
-value and its result is always stored, even when the value is nil."
+value and its result is always stored, even when the value is nil.
+SCHEMA is an optional extra schema alist used for flag detection in
+addition to the global schemas."
   (let* ((head      (plist-get plist :_head))
          (name      (car head))
          (docstring (cadr head)))
@@ -1954,11 +1961,11 @@ value and its result is always stored, even when the value is nil."
           ;; Export field if: (1) val is non-nil, OR (2) val is nil but key is
           ;; flag-type, OR (3) a custom encoder is registered for the key
           (when (and (not (eq key :_head))
-                     (or val (rapid-package-json--is-flag-p key) custom-fn))
+                     (or val (rapid-package-json--is-flag-p key schema) custom-fn))
             (puthash (substring (symbol-name key) 1)
                      (if custom-fn
                          (funcall custom-fn val)
-                       (rapid-package-json--flag-aware-json-value key val))
+                       (rapid-package-json--flag-aware-json-value key val schema))
                      json-obj)))
         (setq tail (cddr tail))))))
 
@@ -2000,10 +2007,12 @@ PACKAGES-DATA is a list of (:type TYPE :data PARSED-PLIST) entries."
       (let ((json-encoding-pretty-print t))
         (insert (json-encode json-data))))))
 
-(defun rapid-package-json--denormalize-field (key json-val)
+(defun rapid-package-json--denormalize-field (key json-val &optional schema)
   "Reverse field-json-value for field KEY.
-Uses schema-based type detection."
-  (let ((type (rapid-package-json--get-field-type key)))
+Uses schema-based type detection.
+SCHEMA is an optional extra schema alist to check in addition to the
+global schemas."
+  (let ((type (rapid-package-json--get-field-type key schema)))
     (cond
      ((eq type 'body)
       (cond
@@ -2105,12 +2114,14 @@ All other slots use denormalize-ir-slot."
      hash)
     plist))
 
-(defun rapid-package--json-to-parsed (json-obj &optional custom-decoders)
+(defun rapid-package--json-to-parsed (json-obj &optional custom-decoders schema)
   "Convert JSON-OBJ to a parsed plist.
 Returns a plist in the same format as `rapid-package-dsl-parse'.
 CUSTOM-DECODERS is an optional alist of (KEY . DECODER-FN) pairs.
 When a key has a custom decoder, the decoder is called with the raw
-JSON value instead of the generic `rapid-package-json--denormalize-field'."
+JSON value instead of the generic `rapid-package-json--denormalize-field'.
+SCHEMA is an optional extra schema alist used for type detection in
+addition to the global schemas."
   (let ((plist nil))
     (maphash
      (lambda (key-str json-val)
@@ -2119,9 +2130,9 @@ JSON value instead of the generic `rapid-package-json--denormalize-field'."
          (unless (memq kw '(:_head :name :description :type))
            (let ((out (if custom-fn
                           (funcall custom-fn json-val)
-                        (rapid-package-json--denormalize-field kw json-val))))
+                        (rapid-package-json--denormalize-field kw json-val schema))))
              ;; Import field if: (1) out is non-nil, OR (2) out is nil but key is flag-type
-             (when (or out (and (null out) (rapid-package-json--is-flag-p kw)))
+             (when (or out (and (null out) (rapid-package-json--is-flag-p kw schema)))
                (setq plist (plist-put plist kw out)))))))
      json-obj)
     (let* ((head-key "name")
