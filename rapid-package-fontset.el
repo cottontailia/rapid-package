@@ -262,20 +262,19 @@ TARGET must be a symbol (script), integer (character), or cons (range)."
   (unless (listp rules)
     (rapid-package--abort name ":rules must be a list"))
   (dolist (rule rules)
-    (unless (and (listp rule) (>= (length rule) 2))
+    (unless (and (listp rule) (keywordp (car rule)) (plist-get rule :target))
       (rapid-package--abort
-       name "Each rule must be (TARGET FONT) or (TARGET FONT OP), got: %S" rule))
-    (let* ((target (car rule))
-           (font   (cadr rule))
-           (op     (and (cddr rule) (caddr rule))))
+       name "Each rule must be a plist (:target TARGET :font FONT :op OP), got: %S" rule))
+    (let* ((target (plist-get rule :target))
+           (font   (plist-get rule :font))
+           (op     (plist-get rule :op)))
       (rapid-package-fontset--validate-target name target)
       (unless (or (stringp font) (rapid-package-fontset--unquote-p font))
         (rapid-package--abort
          name "FONT in rule must be a string or unquote form (e.g. ,var), got: %S" font))
-      (when op
-        (unless (memq op '(prepend append replace))
-          (rapid-package--abort
-           name "Operation must be prepend, append, or replace, got: %S" op)))))
+      (unless (memq op '(prepend append replace))
+        (rapid-package--abort
+         name "Operation must be prepend, append, or replace, got: %S" op))))
   (when variable
     (unless (listp variable)
       (rapid-package--abort name ":variable must be a list of (:variable NAME :value EXPR) entries"))

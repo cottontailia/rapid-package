@@ -1893,10 +1893,12 @@ Values in :value and :default slots are converted with
     (puthash "rapid-package-version" rapid-package-version meta)
     meta))
 
-(defun rapid-package-json--field-json-value (key val)
+(defun rapid-package-json--field-json-value (key val &optional schema)
   "Convert field KEY / VAL pair to a JSON-serializable value.
-Uses schema-based type detection."
-  (let ((type (rapid-package-json--get-field-type key)))
+Uses schema-based type detection.
+SCHEMA is an optional extra schema alist to check in addition to the
+global schemas."
+  (let ((type (rapid-package-json--get-field-type key schema)))
     (cond
      ((eq type 'body)
       (if (consp val)
@@ -1937,7 +1939,7 @@ SCHEMA is an optional extra schema alist to check in addition to the
 global schemas."
   (if (rapid-package-json--is-flag-p key schema)
       (if val t :json-false)
-    (rapid-package-json--field-json-value key val)))
+    (rapid-package-json--field-json-value key val schema)))
 
 (defun rapid-package--plist-to-json-generic (plist head-key json-obj
                                                    &optional custom-encoders schema)
