@@ -73,6 +73,7 @@
 (require 'rapid-package-dsl)
 (require 'rapid-package-dsl-parse)
 (require 'rapid-package-codegen)
+(require 'rapid-package-fontset)
 
 (defconst rapid-package-version "0.5.0"
   "Current version; used in cache metadata and JSON export.")
@@ -165,6 +166,13 @@ Group 2 captures the category name.")
   "Regexp matching a `rapid-package-after' declaration for imenu.
 Group 2 captures the package name.")
 
+(defconst rapid-package--imenu-fontset-regexp
+  (concat "^\\s-*("
+          (regexp-opt '("rapid-package-fontset") t)
+          "\\s-+" rapid-package--imenu-sym-regexp)
+  "Regexp matching a `rapid-package-fontset' declaration for imenu.
+Group 2 captures the fontset name.")
+
 (defconst rapid-package--imenu-package-entry
   (list "Packages" rapid-package--imenu-package-regexp 2)
   "Imenu entry for `rapid-package' declarations.")
@@ -177,6 +185,10 @@ Group 2 captures the package name.")
   (list "After" rapid-package--imenu-after-regexp 2)
   "Imenu entry for `rapid-package-after' declarations.")
 
+(defconst rapid-package--imenu-fontset-entry
+  (list "Fontsets" rapid-package--imenu-fontset-regexp 2)
+  "Imenu entry for `rapid-package-fontset' declarations.")
+
 (defcustom rapid-package-enable-imenu-support nil
   "If non-nil, add rapid-package macros to imenu.
 
@@ -185,6 +197,7 @@ helm-imenu, or counsel-imenu) will list the following declarations:
 - `rapid-package' under \"Packages\"
 - `rapid-package-conf' under \"Conf\"
 - `rapid-package-after' under \"After\"
+- `rapid-package-fontset' under \"Fontsets\"
 
 This works by adding entries to `lisp-imenu-generic-expression', which
 is consulted by `emacs-lisp-mode' when building the imenu index.
@@ -208,7 +221,9 @@ Alternatively, use Customize to toggle it and then restart Emacs."
                   (add-to-list 'lisp-imenu-generic-expression
                                ',rapid-package--imenu-conf-entry)
                   (add-to-list 'lisp-imenu-generic-expression
-                               ',rapid-package--imenu-after-entry))
+                               ',rapid-package--imenu-after-entry)
+                  (add-to-list 'lisp-imenu-generic-expression
+                               ',rapid-package--imenu-fontset-entry))
              `(progn
                 (setq lisp-imenu-generic-expression
                       (delete ',rapid-package--imenu-package-entry
@@ -218,13 +233,16 @@ Alternatively, use Customize to toggle it and then restart Emacs."
                               lisp-imenu-generic-expression))
                 (setq lisp-imenu-generic-expression
                       (delete ',rapid-package--imenu-after-entry
+                              lisp-imenu-generic-expression))
+                (setq lisp-imenu-generic-expression
+                      (delete ',rapid-package--imenu-fontset-entry
                               lisp-imenu-generic-expression)))))
          (set-default sym value)))
 
 ;;; font-lock
 
 (defconst rapid-package--font-lock-keywords
-  '(("(\\(rapid-package\\(?:-conf\\|-after\\)?\\)\\_>[ \t']*\\(\\(?:\\sw\\|\\s_\\)+\\)?"
+  '(("(\\(rapid-package\\(?:-conf\\|-after\\|-fontset\\)?\\)\\_>[ \t']*\\(\\(?:\\sw\\|\\s_\\)+\\)?"
      (1 font-lock-keyword-face)
      (2 font-lock-constant-face nil t)))
   "Font-lock rules to highlight rapid-package macros.")
@@ -1277,8 +1295,15 @@ Returns the list of expanded forms (for writing to .elc cache)."
              (eval form t)
              (rapid-package--tl-append! forms form)))
 
+          ("fontset"
+           (let* ((data (rapid-package-fontset--from-json item))
+                  (form (rapid-package-fontset--expand-from-data data)))
+             (when form
+               (eval form t)
+               (rapid-package--tl-append! forms form))))
+
           (_ (rapid-package--warning 'json
-                                     "%sunknown item type: %s (expected \"package\" or \"config\")"
+                                     "%sunknown item type: %s (expected \"package\", \"config\", or \"fontset\")"
                                      (rapid-package--loc) type)))))
 
     (rapid-package--tl-value forms)))
@@ -1557,7 +1582,8 @@ Returns a list of expanded forms ready for compilation."
 (defun rapid-package--maybe-expand (form)
   "Expand FORM if it's a rapid-package macro, otherwise return as-is."
   (if (and (listp form)
-           (memq (car form) '(rapid-package rapid-package-conf rapid-package-after)))
+           (memq (car form) '(rapid-package rapid-package-conf rapid-package-after
+                               rapid-package-fontset)))
       (macroexpand-all form)
     form))
 
@@ -1590,7 +1616,12 @@ Returns a list of (:type TYPE :data PARSED-PLIST) entries."
                     (rapid-package--tl-append!
                      packages
                      (list :type 'config
-                           :data (rapid-package-dsl-parse (cdr expanded) rapid-package-conf-schema)))))))))
+                           :data (rapid-package-dsl-parse (cdr expanded) rapid-package-conf-schema))))))
+               ((and (listp form) (eq (car form) 'rapid-package-fontset))
+                (rapid-package--tl-append!
+                 packages
+                 (list :type 'fontset
+                       :data (rapid-package-fontset--parse-args (cdr form))))))))
         (end-of-file nil)))
     (rapid-package--tl-value packages)))
 
@@ -1598,6 +1629,7 @@ Returns a list of (:type TYPE :data PARSED-PLIST) entries."
 
 (defun rapid-package-json--get-field-type (key)
   "Get the type of field KEY from schema.
+Checks `rapid-package-schema' and `rapid-package-conf-schema'.
 Returns: body, ir, or lisp-value"
   (let ((schema-entry (or (assq key rapid-package-schema)
                           (assq key rapid-package-conf-schema))))
@@ -1885,8 +1917,10 @@ Uses schema-based type detection."
      (t (rapid-package-json--normalize-lisp-value val)))))
 
 (defun rapid-package-json--is-flag-p (key)
-  "Return non-nil if KEY is a flag-type field in schema.
-Checks both `rapid-package-schema' and `rapid-package-conf-schema'."
+  "Return non-nil if KEY is a flag-type field in any known schema.
+Checks `rapid-package-schema' and `rapid-package-conf-schema'.
+Fontset-specific flag keys (e.g. `:default') are handled directly in
+`rapid-package-fontset--from-json' and `rapid-package-fontset--json-encoders'."
   (let ((schema-entry (or (assq key rapid-package-schema)
                           (assq key rapid-package-conf-schema))))
     (and schema-entry
@@ -1901,8 +1935,11 @@ conversion via `rapid-package-json--field-json-value'."
       (if val t :json-false)
     (rapid-package-json--field-json-value key val)))
 
-(defun rapid-package--plist-to-json-generic (plist head-key json-obj)
-  "Serialize PLIST into JSON-OBJ using HEAD-KEY for the name field."
+(defun rapid-package--plist-to-json-generic (plist head-key json-obj &optional custom-encoders)
+  "Serialize PLIST into JSON-OBJ using HEAD-KEY for the name field.
+CUSTOM-ENCODERS is an optional alist of (KEY . ENCODER-FN) pairs.
+When a key has a custom encoder, the encoder is called with the field
+value and its result is always stored, even when the value is nil."
   (let* ((head      (plist-get plist :_head))
          (name      (car head))
          (docstring (cadr head)))
@@ -1911,13 +1948,17 @@ conversion via `rapid-package-json--field-json-value'."
       (puthash "description" docstring json-obj))
     (let ((tail plist))
       (while tail
-        (let ((key (car tail))
-              (val (cadr tail)))
-          ;; Export field if: (1) val is non-nil, OR (2) val is nil but key is flag-type
+        (let* ((key (car tail))
+               (val (cadr tail))
+               (custom-fn (and custom-encoders (cdr (assq key custom-encoders)))))
+          ;; Export field if: (1) val is non-nil, OR (2) val is nil but key is
+          ;; flag-type, OR (3) a custom encoder is registered for the key
           (when (and (not (eq key :_head))
-                     (or val (rapid-package-json--is-flag-p key)))
+                     (or val (rapid-package-json--is-flag-p key) custom-fn))
             (puthash (substring (symbol-name key) 1)
-                     (rapid-package-json--flag-aware-json-value key val)
+                     (if custom-fn
+                         (funcall custom-fn val)
+                       (rapid-package-json--flag-aware-json-value key val))
                      json-obj)))
         (setq tail (cddr tail))))))
 
@@ -1932,14 +1973,15 @@ conversion via `rapid-package-json--field-json-value'."
 (defun rapid-package--to-json (plist type)
   "Convert PLIST to JSON object.
 
-TYPE should be \\='package or \\='config.
+TYPE should be \\='package, \\='config, or \\='fontset.
 
 Returns a hash table ready for JSON encoding."
   (let ((json-obj (make-hash-table :test 'equal)))
-    (puthash "type" (if (eq type 'package) "package" "config") json-obj)
-    (if (eq type 'package)
-        (rapid-package--package-to-json plist json-obj)
-      (rapid-package--config-to-json plist json-obj))
+    (puthash "type" (symbol-name type) json-obj)
+    (cond
+     ((eq type 'fontset) (rapid-package-fontset--fill-json plist json-obj))
+     ((eq type 'package) (rapid-package--package-to-json  plist json-obj))
+     (t                  (rapid-package--config-to-json   plist json-obj)))
     json-obj))
 
 (defun rapid-package--export-json (packages-data json-file)
@@ -2063,15 +2105,21 @@ All other slots use denormalize-ir-slot."
      hash)
     plist))
 
-(defun rapid-package--json-to-parsed (json-obj)
+(defun rapid-package--json-to-parsed (json-obj &optional custom-decoders)
   "Convert JSON-OBJ to a parsed plist.
-Returns a plist in the same format as `rapid-package-dsl-parse'."
+Returns a plist in the same format as `rapid-package-dsl-parse'.
+CUSTOM-DECODERS is an optional alist of (KEY . DECODER-FN) pairs.
+When a key has a custom decoder, the decoder is called with the raw
+JSON value instead of the generic `rapid-package-json--denormalize-field'."
   (let ((plist nil))
     (maphash
      (lambda (key-str json-val)
-       (let ((kw (intern (concat ":" key-str))))
+       (let* ((kw (intern (concat ":" key-str)))
+              (custom-fn (and custom-decoders (cdr (assq kw custom-decoders)))))
          (unless (memq kw '(:_head :name :description :type))
-           (let ((out (rapid-package-json--denormalize-field kw json-val)))
+           (let ((out (if custom-fn
+                          (funcall custom-fn json-val)
+                        (rapid-package-json--denormalize-field kw json-val))))
              ;; Import field if: (1) out is non-nil, OR (2) out is nil but key is flag-type
              (when (or out (and (null out) (rapid-package-json--is-flag-p kw)))
                (setq plist (plist-put plist kw out)))))))
