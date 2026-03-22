@@ -257,7 +257,9 @@ TARGET must be a symbol (script), integer (character), or cons (range)."
   "Validate and expand fontset IR DATA plist to an executable form.
 DATA must contain :_head (with name), :base, and :rules, and may include
 :size, :rescale, :default, :variable, and condition keywords.
-Wraps in (when CONDITION ...) unless CONDITION is t."
+When :default t is specified, wraps the body in a named function registered
+with `after-make-frame-functions' and calls it immediately for the current
+frame.  Otherwise wraps in (when CONDITION ...) unless CONDITION is t."
   (let* ((condition (rapid-package--check-condition data))
          (head-cons (rapid-package--parse-head (plist-get data :_head)))
          (name      (car head-cons))
@@ -268,11 +270,18 @@ Wraps in (when CONDITION ...) unless CONDITION is t."
          (default-p (plist-get data :default))
          (variable  (plist-get data :variable)))
     (rapid-package-fontset--validate name base rules size variable)
-    (let ((body (rapid-package--codegen-fontset
-                 name base size rules rescale default-p variable)))
-      (if (eq condition t)
-          body
-        `(when ,condition ,body)))))
+    (let* ((body         (rapid-package--codegen-fontset
+                          name base size rules rescale default-p variable))
+           (wrapped-body (if (eq condition t) body `(when ,condition ,body)))
+           (fn-name      (intern (format "rapid-package-fontset--apply-%s" name))))
+      (if default-p
+          `(progn
+             (defun ,fn-name (frame)
+               (with-selected-frame frame
+                 ,wrapped-body))
+             (add-hook 'after-make-frame-functions #',fn-name)
+             (,fn-name (selected-frame)))
+        wrapped-body))))
 
 ;;;###autoload
 (defmacro rapid-package-fontset (name &rest args)
