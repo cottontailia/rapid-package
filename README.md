@@ -4,9 +4,34 @@
 [![Emacs](https://img.shields.io/badge/Emacs-29.1+-purple.svg)](https://www.gnu.org/software/emacs/)
 
 > 🚧 Work in Progress
->  
+>
 > This project is currently under active development.
 > Documentation is not ready yet.
+
+## Fontset Example
+
+```elisp
+(rapid-package-fontset myfont
+  :when-gui
+  :variable
+  (cjk-font   "Source Han Sans")   ; Adobe/Google pan-CJK font (han, kana, hangul)
+  (emoji-font  "Noto Color Emoji") ; Google color emoji
+  :base "Iosevka"
+  :size 14
+  :rules
+  (han    ,cjk-font)
+  (kana   ,cjk-font)
+  (hangul ,cjk-font)
+  (emoji  ,emoji-font)
+  :rescale
+  (,cjk-font  1.05)   ; widen CJK glyphs to match ASCII cell width
+  (,emoji-font 0.90)  ; shrink emoji to avoid line-height expansion
+  :default t
+  :custom-face
+  (fixed-pitch       ((t (:font ,myfont))))
+  (fixed-pitch-serif ((t (:font ,myfont))))
+  (variable-pitch    ((t (:font ,myfont)))))
+```
 
 ## Example
 
