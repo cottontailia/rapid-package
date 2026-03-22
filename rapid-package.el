@@ -1296,7 +1296,7 @@ Returns the list of expanded forms (for writing to .elc cache)."
              (rapid-package--tl-append! forms form)))
 
           ("fontset"
-           (let* ((data (rapid-package-fontset--from-json item))
+           (let* ((data (rapid-package--json-to-parsed item rapid-package-fontset-schema))
                   (form (rapid-package-fontset--expand-from-data data)))
              (when form
                (eval form t)
@@ -1971,7 +1971,7 @@ Returns a hash table ready for JSON encoding."
   (let ((json-obj (make-hash-table :test 'equal)))
     (puthash "type" (symbol-name type) json-obj)
     (cond
-     ((eq type 'fontset) (rapid-package-fontset--fill-json plist json-obj))
+     ((eq type 'fontset) (rapid-package--plist-to-json-generic plist "name" json-obj rapid-package-fontset-schema))
      ((eq type 'package) (rapid-package--package-to-json  plist json-obj))
      (t                  (rapid-package--config-to-json   plist json-obj)))
     json-obj))

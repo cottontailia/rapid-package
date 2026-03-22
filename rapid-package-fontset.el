@@ -32,8 +32,6 @@
 (declare-function rapid-package--abort "rapid-package")
 (declare-function rapid-package--parse-head "rapid-package")
 (declare-function rapid-package--check-condition "rapid-package")
-(declare-function rapid-package--plist-to-json-generic "rapid-package")
-(declare-function rapid-package--json-to-parsed "rapid-package")
 (declare-function rapid-package--codegen-unquote "rapid-package-codegen")
 
 ;; Variables defined in rapid-package.el, used at runtime by parsers.
@@ -374,33 +372,6 @@ NAME is a symbol; the generated fontset is named \"fontset-NAME\".
     (rapid-package--abort 'macro "NAME must be a symbol, got: %S" name))
   (rapid-package-fontset--expand-from-data
    (rapid-package-fontset--parse-args (cons name args))))
-
-;;; Fontset JSON
-
-(defun rapid-package-fontset--fill-json (data json-obj)
-  "Fill JSON-OBJ with fontset DATA fields.
-Uses `rapid-package--plist-to-json-generic' with fontset schema for
-flag detection (`:default') and IR type resolution (`:rules', `:rescale').
-Does not set the \"type\" field; the caller is responsible for that."
-  (rapid-package--plist-to-json-generic
-   data "name" json-obj rapid-package-fontset-schema))
-
-(defun rapid-package-fontset--to-json (data)
-  "Serialize fontset IR plist DATA to a JSON hash-table.
-DATA is a plist produced by `rapid-package-fontset--parse-args'.
-Returns a hash-table suitable for `json-encode'.
-The output shape matches the shared item contract used by
-`rapid-package--export-json' (type-tagged object in `items')."
-  (let ((obj (make-hash-table :test 'equal)))
-    (puthash "type" "fontset" obj)
-    (rapid-package-fontset--fill-json data obj)
-    obj))
-
-(defun rapid-package-fontset--from-json (item)
-  "Deserialize a fontset JSON hash-table ITEM into fontset IR plist.
-ITEM is a hash-table as returned by `json-read'.
-Returns a plist compatible with `rapid-package-fontset--expand-from-data'."
-  (rapid-package--json-to-parsed item rapid-package-fontset-schema))
 
 (provide 'rapid-package-fontset)
 
