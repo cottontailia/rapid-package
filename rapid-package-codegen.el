@@ -39,10 +39,13 @@ This function strips the marker at the final codegen step."
 (defun rapid-package--codegen-sexp (val)
   "Convert VAL to code that produces it at runtime.
 Recursively traverses VAL, expanding (\\, EXPR) unquote markers to EXPR.
+Proper lists are emitted as (list ...) calls; improper conses use cons.
 Used for emitting face specs that contain nested unquote references."
   (cond
    ((null val) nil)
    ((and (consp val) (eq (car val) '\,)) (cadr val))
+   ((proper-list-p val)
+    `(list ,@(mapcar #'rapid-package--codegen-sexp val)))
    ((consp val)
     `(cons ,(rapid-package--codegen-sexp (car val))
            ,(rapid-package--codegen-sexp (cdr val))))

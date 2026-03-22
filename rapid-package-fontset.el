@@ -119,9 +119,9 @@ CUSTOM-FACES is an optional list of normalized face plists."
              rescale)))
          (default-forms
           (when default-p
-            `((set-frame-font ,fontset-name t)
-              (set-face-attribute 'default nil :font ,fontset-name)
-              (setf (alist-get 'font default-frame-alist) ,fontset-name))))
+            `((set-frame-font ,name t)
+              (set-face-attribute 'default nil :font ,name)
+              (setf (alist-get 'font default-frame-alist) ,name))))
          (custom-face-forms
           (rapid-package--codegen-custom-face-forms custom-faces))
          (body-forms
