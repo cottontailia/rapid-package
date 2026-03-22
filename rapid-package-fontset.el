@@ -118,6 +118,7 @@ VARIABLE is an optional list of (SYMBOL EXPR) let* bindings."
          (default-forms
           (when default-p
             `((set-frame-font ,fontset-name t)
+              (set-face-attribute 'default nil :font ,fontset-name)
               (setf (alist-get 'font default-frame-alist) ,fontset-name))))
          (body-forms
           `(;; Create fontset if absent.
