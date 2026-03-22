@@ -302,9 +302,11 @@ the head list for other accumulators."
                ((eq current-type 'alist)
                 (cond
                  ;; Container list: ((k1 . v1) (k2 . v2) ...)
+                 ;; Exclude unquote forms (\, EXPR) as car -- those are single pairs.
                  ((and (listp item)
                        (consp (car item))
-                       (not (keywordp (car (car item)))))
+                       (not (keywordp (car (car item))))
+                       (not (eq (car (car item)) '\,)))
                   (dolist (pair item)
                     (if (consp pair)
                         (append-to-key
