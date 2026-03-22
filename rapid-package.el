@@ -1942,11 +1942,8 @@ global schemas."
     (rapid-package-json--field-json-value key val schema)))
 
 (defun rapid-package--plist-to-json-generic (plist head-key json-obj
-                                                   &optional custom-encoders schema)
+                                                   &optional schema)
   "Serialize PLIST into JSON-OBJ using HEAD-KEY for the name field.
-CUSTOM-ENCODERS is an optional alist of (KEY . ENCODER-FN) pairs.
-When a key has a custom encoder, the encoder is called with the field
-value and its result is always stored, even when the value is nil.
 SCHEMA is an optional extra schema alist used for flag detection in
 addition to the global schemas."
   (let* ((head      (plist-get plist :_head))
@@ -1958,16 +1955,12 @@ addition to the global schemas."
     (let ((tail plist))
       (while tail
         (let* ((key (car tail))
-               (val (cadr tail))
-               (custom-fn (and custom-encoders (cdr (assq key custom-encoders)))))
-          ;; Export field if: (1) val is non-nil, OR (2) val is nil but key is
-          ;; flag-type, OR (3) a custom encoder is registered for the key
+               (val (cadr tail)))
+          ;; Export field if: (1) val is non-nil, OR (2) val is nil but key is flag-type
           (when (and (not (eq key :_head))
-                     (or val (rapid-package-json--is-flag-p key schema) custom-fn))
+                     (or val (rapid-package-json--is-flag-p key schema)))
             (puthash (substring (symbol-name key) 1)
-                     (if custom-fn
-                         (funcall custom-fn val)
-                       (rapid-package-json--flag-aware-json-value key val schema))
+                     (rapid-package-json--flag-aware-json-value key val schema)
                      json-obj)))
         (setq tail (cddr tail))))))
 
@@ -2116,23 +2109,17 @@ All other slots use denormalize-ir-slot."
      hash)
     plist))
 
-(defun rapid-package--json-to-parsed (json-obj &optional custom-decoders schema)
+(defun rapid-package--json-to-parsed (json-obj &optional schema)
   "Convert JSON-OBJ to a parsed plist.
 Returns a plist in the same format as `rapid-package-dsl-parse'.
-CUSTOM-DECODERS is an optional alist of (KEY . DECODER-FN) pairs.
-When a key has a custom decoder, the decoder is called with the raw
-JSON value instead of the generic `rapid-package-json--denormalize-field'.
 SCHEMA is an optional extra schema alist used for type detection in
 addition to the global schemas."
   (let ((plist nil))
     (maphash
      (lambda (key-str json-val)
-       (let* ((kw (intern (concat ":" key-str)))
-              (custom-fn (and custom-decoders (cdr (assq kw custom-decoders)))))
+       (let* ((kw (intern (concat ":" key-str))))
          (unless (memq kw '(:_head :name :description :type))
-           (let ((out (if custom-fn
-                          (funcall custom-fn json-val)
-                        (rapid-package-json--denormalize-field kw json-val schema))))
+           (let ((out (rapid-package-json--denormalize-field kw json-val schema)))
              ;; Import field if: (1) out is non-nil, OR (2) out is nil but key is flag-type
              (when (or out (and (null out) (rapid-package-json--is-flag-p kw schema)))
                (setq plist (plist-put plist kw out)))))))
