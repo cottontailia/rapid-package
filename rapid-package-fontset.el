@@ -19,8 +19,6 @@
 ;; Functions used from rapid-package.el (declared below, not required):
 ;;   rapid-package--abort, rapid-package--parse-head,
 ;;   rapid-package--check-condition,
-;;   rapid-package-json--normalize-lisp-value,
-;;   rapid-package-json--denormalize-lisp-value,
 ;;   rapid-package--plist-to-json-generic, rapid-package--json-to-parsed
 ;;
 ;; Function used from rapid-package-codegen.el (declared below):
@@ -34,8 +32,6 @@
 (declare-function rapid-package--abort "rapid-package")
 (declare-function rapid-package--parse-head "rapid-package")
 (declare-function rapid-package--check-condition "rapid-package")
-(declare-function rapid-package-json--normalize-lisp-value "rapid-package")
-(declare-function rapid-package-json--denormalize-lisp-value "rapid-package")
 (declare-function rapid-package--plist-to-json-generic "rapid-package")
 (declare-function rapid-package--json-to-parsed "rapid-package")
 (declare-function rapid-package--codegen-unquote "rapid-package-codegen")
