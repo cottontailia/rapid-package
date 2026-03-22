@@ -33,6 +33,7 @@
 (declare-function rapid-package--parse-head "rapid-package")
 (declare-function rapid-package--check-condition "rapid-package")
 (declare-function rapid-package--codegen-unquote "rapid-package-codegen")
+(declare-function rapid-package--codegen-custom-face-forms "rapid-package-codegen")
 
 ;; Variables defined in rapid-package.el, used at runtime by parsers.
 (defvar rapid-package--loading-file)
@@ -76,14 +77,15 @@ Each parsed entry is stored as a plist (:target TARGET :font FONT :op OP)."
    ((consp target)    `',target)))
 
 (defun rapid-package--codegen-fontset (name base size rules rescale default-p
-                                            &optional variable)
+                                            &optional variable custom-faces)
   "Generate the fontset setup form for NAME.
 BASE is the base font string or unquote form.
 SIZE is an optional numeric size.
 RULES is the list of (:target TARGET :font FONT :op OP) plists.
 RESCALE is the list of (FONT-REGEXP RATIO) entries or nil.
 DEFAULT-P is non-nil to set this fontset as the default face font.
-VARIABLE is an optional list of (SYMBOL EXPR) let* bindings."
+VARIABLE is an optional list of (SYMBOL EXPR) let* bindings.
+CUSTOM-FACES is an optional list of normalized face plists."
   (let* ((name-str     (symbol-name name))
          (fontset-name (concat "fontset-" name-str))
          (base-form    (rapid-package--codegen-unquote base))
@@ -120,6 +122,8 @@ VARIABLE is an optional list of (SYMBOL EXPR) let* bindings."
             `((set-frame-font ,fontset-name t)
               (set-face-attribute 'default nil :font ,fontset-name)
               (setf (alist-get 'font default-frame-alist) ,fontset-name))))
+         (custom-face-forms
+          (rapid-package--codegen-custom-face-forms custom-faces))
          (body-forms
           `(;; Create fontset if absent.
             (unless (member ,fontset-name (fontset-list))
@@ -131,7 +135,9 @@ VARIABLE is an optional list of (SYMBOL EXPR) let* bindings."
             ;; Update rescale alist.
             ,@rescale-forms
             ;; Set as default face/frame font if requested.
-            ,@default-forms)))
+            ,@default-forms
+            ;; Apply custom face specs.
+            ,@custom-face-forms)))
     (if variable
         `(let* ,(mapcar (lambda (e)
                           (list (plist-get e :variable)
@@ -154,6 +160,7 @@ VARIABLE is an optional list of (SYMBOL EXPR) let* bindings."
     (:rules          . (rapid-package-dsl-parse-fontset-rules
                         . rapid-package--tl-value))
     (:rescale        . alist)
+    (:custom-face    . alist)
     (:default        . flag)
     (:when           . single)
     (:unless         . single)
@@ -215,8 +222,10 @@ TARGET must be a symbol (script), integer (character), or cons (range)."
      "Invalid TARGET %S: must be a script symbol, character integer, or (FROM . TO) cons"
      target)))
 
-(defun rapid-package-fontset--validate (name base rules &optional size variable)
-  "Validate NAME, BASE, RULES, SIZE, and VARIABLE for `rapid-package-fontset'."
+(defun rapid-package-fontset--validate (name base rules &optional size variable
+                                             custom-faces)
+  "Validate NAME, BASE, RULES, SIZE, VARIABLE, and CUSTOM-FACES.
+For `rapid-package-fontset'."
   (unless (string-match-p "\\`[[:alnum:]_]+\\'" (symbol-name name))
     (rapid-package--abort
      name
@@ -252,7 +261,10 @@ TARGET must be a symbol (script), integer (character), or cons (range)."
       (unless (and (listp e)
                    (symbolp (plist-get e :variable)))
         (rapid-package--abort
-         name ":variable entry must be (:variable SYMBOL :value EXPR), got: %S" e)))))
+         name ":variable entry must be (:variable SYMBOL :value EXPR), got: %S" e))))
+  (when custom-faces
+    (unless (listp custom-faces)
+      (rapid-package--abort name ":custom-face must be a list"))))
 
 (defun rapid-package-fontset--expand-from-data (data)
   "Validate and expand fontset IR DATA plist to an executable form.
@@ -268,11 +280,12 @@ frame.  Otherwise wraps in (when CONDITION ...) unless CONDITION is t."
          (size      (plist-get data :size))
          (rules     (plist-get data :rules))
          (rescale   (plist-get data :rescale))
-         (default-p (plist-get data :default))
-         (variable  (plist-get data :variable)))
-    (rapid-package-fontset--validate name base rules size variable)
+         (default-p    (plist-get data :default))
+         (variable     (plist-get data :variable))
+         (custom-faces (plist-get data :custom-face)))
+    (rapid-package-fontset--validate name base rules size variable custom-faces)
     (let* ((body         (rapid-package--codegen-fontset
-                          name base size rules rescale default-p variable))
+                          name base size rules rescale default-p variable custom-faces))
            (wrapped-body (if (eq condition t) body `(when ,condition ,body)))
            (fn-name      (intern (format "rapid-package-fontset--apply-%s" name))))
       (if default-p
@@ -294,6 +307,7 @@ frame.  Otherwise wraps in (when CONDITION ...) unless CONDITION is t."
   [:size NUMBER]
   [:rules (RULE ...)]
   [:rescale (RESCALE-RULE ...)]
+  [:custom-face (FACE-NAME . SPEC) ...]
   [:default BOOL]
   [:when CONDITION]
   [:unless CONDITION]
@@ -334,6 +348,12 @@ NAME is a symbol; the generated fontset is named \"fontset-NAME\".
 :rescale (optional) — list of (FONT-REGEXP RATIO) entries.
   FONT-REGEXP may be a string or ,EXPR unquote.
   Updates `face-font-rescale-alist' (global; last definition wins).
+
+:custom-face (optional) — list of (FACE-NAME . SPEC) or (FACE-NAME SPEC).
+  Each entry emits a `face-spec-set' call after the fontset is applied.
+  When :default t, these calls run inside the per-frame hook function.
+  SPEC supports ,EXPR unquote for runtime evaluation.
+  Example: :custom-face (variable-pitch . ((t (:family \"Noto Serif\"))))
 
 :default (optional) — when t, sets this fontset as the default face font
   and adds it to `default-frame-alist'.
