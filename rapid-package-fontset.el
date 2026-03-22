@@ -202,8 +202,6 @@ Returns a plist with :_head, :base, :size, :rules, :rescale, :default,
                      (or (plist-get parsed :variable) nil))))
     (unless base
       (rapid-package--abort name ":base is required"))
-    (unless rules
-      (rapid-package--abort name ":rules is required"))
     (list :_head          (if doc (list name doc) (list name))
           :base          base
           :size          size
@@ -307,7 +305,7 @@ Wraps in (when CONDITION ...) unless CONDITION is t."
   [:variable ((VAR EXPR) ...)]
   :base STRING-OR-UNQUOTE
   [:size NUMBER]
-  :rules (RULE ...)
+  [:rules (RULE ...)]
   [:rescale (RESCALE-RULE ...)]
   [:default BOOL]
   [:when CONDITION]
@@ -336,7 +334,7 @@ NAME is a symbol; the generated fontset is named \"fontset-NAME\".
   Pass only family names here (e.g. \"Iosevka\" or ,my-font).
   Do not encode font size in :base or in rule font names.
 
-:rules (required) — list of (TARGET FONT) or (TARGET FONT OP) entries.
+:rules (optional) — list of (TARGET FONT) or (TARGET FONT OP) entries.
   TARGET: script symbol (e.g. \\='han), character (e.g. ?A), or range cons
     (e.g. \\='(#xe000 . #xf8ff)).
   FONT: font name string or ,EXPR unquote.
