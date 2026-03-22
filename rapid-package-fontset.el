@@ -138,13 +138,12 @@ CUSTOM-FACES is an optional list of normalized face plists."
             ,@default-forms
             ;; Apply custom face specs.
             ,@custom-face-forms)))
-    (if variable
-        `(let* ,(mapcar (lambda (e)
-                          (list (plist-get e :variable)
-                                (rapid-package--codegen-unquote (plist-get e :value))))
-                        variable)
-           ,@body-forms)
-      `(progn ,@body-forms))))
+    `(let* (,(list name fontset-name)
+            ,@(mapcar (lambda (e)
+                        (list (plist-get e :variable)
+                              (rapid-package--codegen-unquote (plist-get e :value))))
+                      variable))
+       ,@body-forms)))
 
 ;;; Fontset
 
