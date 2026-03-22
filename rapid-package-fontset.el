@@ -193,36 +193,13 @@ Returns a plist with :_head, :base, :size, :rules, :rescale, :default,
          (name      (car head-cons))
          (doc       (cdr head-cons))
          (base      (plist-get parsed :base))
-         (size      (plist-get parsed :size))
-         (rules     (plist-get parsed :rules))
-         (rescale   (plist-get parsed :rescale))
-         (default   (plist-get parsed :default))
          (variable  (cl-remove-if
                      (lambda (e) (null (plist-get e :variable)))
                      (or (plist-get parsed :variable) nil))))
     (unless base
       (rapid-package--abort name ":base is required"))
-    (list :_head          (if doc (list name doc) (list name))
-          :base          base
-          :size          size
-          :rules         rules
-          :rescale       rescale
-          :default       default
-          :variable      variable
-          :when          (plist-get parsed :when)
-          :unless        (plist-get parsed :unless)
-          :when-system   (plist-get parsed :when-system)
-          :unless-system (plist-get parsed :unless-system)
-          :when-gui      (plist-get parsed :when-gui)
-          :when-tty      (plist-get parsed :when-tty)
-          :when-ge       (plist-get parsed :when-ge)
-          :when-gt       (plist-get parsed :when-gt)
-          :when-le       (plist-get parsed :when-le)
-          :when-lt       (plist-get parsed :when-lt)
-          :when-eq       (plist-get parsed :when-eq)
-          :when-ne       (plist-get parsed :when-ne)
-          :when-p        (plist-get parsed :when-p)
-          :disabled      (plist-get parsed :disabled))))
+    (let* ((result (plist-put parsed :_head (if doc (list name doc) (list name)))))
+      (plist-put result :variable variable))))
 
 (defun rapid-package-fontset--validate-target (name target)
   "Validate TARGET in a rule for fontset NAME.
