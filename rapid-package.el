@@ -1276,7 +1276,7 @@ Returns the list of expanded forms (for writing to .elc cache)."
              (rapid-package--loading-line (aref item-lines i)))
         (pcase type
           ("package"
-           (let* ((plist     (rapid-package--json-to-parsed item))
+           (let* ((plist     (rapid-package--json-to-parsed item rapid-package-schema))
                   (head      (plist-get plist :_head))
                   (form      (rapid-package--expand-package
                               (car head)
@@ -1286,7 +1286,7 @@ Returns the list of expanded forms (for writing to .elc cache)."
              (rapid-package--tl-append! forms form)))
 
           ("config"
-           (let* ((plist     (rapid-package--json-to-parsed item))
+           (let* ((plist     (rapid-package--json-to-parsed item rapid-package-conf-schema))
                   (head      (plist-get plist :_head))
                   (form      (rapid-package--expand-conf
                               (car head)
@@ -1627,14 +1627,11 @@ Returns a list of (:type TYPE :data PARSED-PLIST) entries."
 
 ;;; JSON Conversion Helpers
 
-(defun rapid-package-json--get-field-type (key &optional extra-schema)
-  "Get the type of field KEY from schema.
-Checks `rapid-package-schema', `rapid-package-conf-schema', and
-optionally EXTRA-SCHEMA (a schema alist in the same format).
+(defun rapid-package-json--get-field-type (key schema)
+  "Get the type of field KEY from SCHEMA.
+SCHEMA is a schema alist in the same format as `rapid-package-schema'.
 Returns: body, ir, or lisp-value"
-  (let ((schema-entry (or (assq key rapid-package-schema)
-                          (assq key rapid-package-conf-schema)
-                          (and extra-schema (assq key extra-schema)))))
+  (let ((schema-entry (assq key schema)))
     (if schema-entry
         (let ((spec (cdr schema-entry)))
           (cond
@@ -1893,11 +1890,10 @@ Values in :value and :default slots are converted with
     (puthash "rapid-package-version" rapid-package-version meta)
     meta))
 
-(defun rapid-package-json--field-json-value (key val &optional schema)
+(defun rapid-package-json--field-json-value (key val schema)
   "Convert field KEY / VAL pair to a JSON-serializable value.
 Uses schema-based type detection.
-SCHEMA is an optional extra schema alist to check in addition to the
-global schemas."
+SCHEMA is a schema alist in the same format as `rapid-package-schema'."
   (let ((type (rapid-package-json--get-field-type key schema)))
     (cond
      ((eq type 'body)
@@ -1920,32 +1916,26 @@ global schemas."
         (rapid-package-json--normalize-lisp-value val)))
      (t (rapid-package-json--normalize-lisp-value val)))))
 
-(defun rapid-package-json--is-flag-p (key &optional extra-schema)
-  "Return non-nil if KEY is a flag-type field in any known schema.
-Checks `rapid-package-schema', `rapid-package-conf-schema', and
-optionally EXTRA-SCHEMA (a schema alist in the same format)."
-  (let ((schema-entry (or (assq key rapid-package-schema)
-                          (assq key rapid-package-conf-schema)
-                          (and extra-schema (assq key extra-schema)))))
+(defun rapid-package-json--is-flag-p (key schema)
+  "Return non-nil if KEY is a flag-type field in SCHEMA.
+SCHEMA is a schema alist in the same format as `rapid-package-schema'."
+  (let ((schema-entry (assq key schema)))
     (and schema-entry
          (eq (cdr schema-entry) 'flag))))
 
-(defun rapid-package-json--flag-aware-json-value (key val &optional schema)
+(defun rapid-package-json--flag-aware-json-value (key val schema)
   "Convert VAL to JSON value, preserving flag-type nil.
 For flag-type fields, nil is converted to :json-false to preserve
 information during JSON round-trip. For other fields, uses standard
 conversion via `rapid-package-json--field-json-value'.
-SCHEMA is an optional extra schema alist to check in addition to the
-global schemas."
+SCHEMA is a schema alist in the same format as `rapid-package-schema'."
   (if (rapid-package-json--is-flag-p key schema)
       (if val t :json-false)
     (rapid-package-json--field-json-value key val schema)))
 
-(defun rapid-package--plist-to-json-generic (plist head-key json-obj
-                                                   &optional schema)
+(defun rapid-package--plist-to-json-generic (plist head-key json-obj schema)
   "Serialize PLIST into JSON-OBJ using HEAD-KEY for the name field.
-SCHEMA is an optional extra schema alist used for flag detection in
-addition to the global schemas."
+SCHEMA is a schema alist in the same format as `rapid-package-schema'."
   (let* ((head      (plist-get plist :_head))
          (name      (car head))
          (docstring (cadr head)))
@@ -1966,11 +1956,11 @@ addition to the global schemas."
 
 (defun rapid-package--package-to-json (plist json-obj)
   "Convert package PLIST to JSON-OBJ using generic conversion."
-  (rapid-package--plist-to-json-generic plist "name" json-obj))
+  (rapid-package--plist-to-json-generic plist "name" json-obj rapid-package-schema))
 
 (defun rapid-package--config-to-json (plist json-obj)
   "Convert config PLIST to JSON-OBJ using generic conversion."
-  (rapid-package--plist-to-json-generic plist "name" json-obj))
+  (rapid-package--plist-to-json-generic plist "name" json-obj rapid-package-conf-schema))
 
 (defun rapid-package--to-json (plist type)
   "Convert PLIST to JSON object.
@@ -2002,11 +1992,10 @@ PACKAGES-DATA is a list of (:type TYPE :data PARSED-PLIST) entries."
       (let ((json-encoding-pretty-print t))
         (insert (json-encode json-data))))))
 
-(defun rapid-package-json--denormalize-field (key json-val &optional schema)
+(defun rapid-package-json--denormalize-field (key json-val schema)
   "Reverse field-json-value for field KEY.
 Uses schema-based type detection.
-SCHEMA is an optional extra schema alist to check in addition to the
-global schemas."
+SCHEMA is a schema alist in the same format as `rapid-package-schema'."
   (let ((type (rapid-package-json--get-field-type key schema)))
     (cond
      ((eq type 'body)
@@ -2109,11 +2098,10 @@ All other slots use denormalize-ir-slot."
      hash)
     plist))
 
-(defun rapid-package--json-to-parsed (json-obj &optional schema)
+(defun rapid-package--json-to-parsed (json-obj schema)
   "Convert JSON-OBJ to a parsed plist.
 Returns a plist in the same format as `rapid-package-dsl-parse'.
-SCHEMA is an optional extra schema alist used for type detection in
-addition to the global schemas."
+SCHEMA is a schema alist in the same format as `rapid-package-schema'."
   (let ((plist nil))
     (maphash
      (lambda (key-str json-val)
