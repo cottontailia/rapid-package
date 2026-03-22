@@ -19,7 +19,7 @@
 (require 'cl-lib)
 (require 'rapid-package-tl)
 
-;;; Unquote helper
+;;; Unquote helpers
 
 (defun rapid-package--codegen-unquote (val)
   "Unwrap (\\, EXPR) to EXPR for code emission; return other values unchanged.
@@ -28,6 +28,26 @@ This function strips the marker at the final codegen step."
   (if (and (consp val) (eq (car val) '\,))
       (cadr val)
     val))
+
+(defun rapid-package--contains-unquote-p (val)
+  "Return t if VAL contains any (\\, ...) unquote marker at any depth."
+  (and (consp val)
+       (or (eq (car val) '\,)
+           (rapid-package--contains-unquote-p (car val))
+           (rapid-package--contains-unquote-p (cdr val)))))
+
+(defun rapid-package--codegen-sexp (val)
+  "Convert VAL to code that produces it at runtime.
+Recursively traverses VAL, expanding (\\, EXPR) unquote markers to EXPR.
+Used for emitting face specs that contain nested unquote references."
+  (cond
+   ((null val) nil)
+   ((and (consp val) (eq (car val) '\,)) (cadr val))
+   ((consp val)
+    `(cons ,(rapid-package--codegen-sexp (car val))
+           ,(rapid-package--codegen-sexp (cdr val))))
+   ((symbolp val) `',val)
+   (t val)))
 
 ;;; Position helpers
 
@@ -191,9 +211,16 @@ so the output uses #\\=' for proper compile-time function resolution."
                              ((and (consp qval) (eq (car qval) 'quote)) (cadr qval))
                              ((and (consp qval) (eq (car qval) '\,))    (cadr qval))
                              (t qval))))
-                (if (and (consp qval) (eq (car qval) '\,))
-                    `(face-spec-set ',face ,spec)
-                  `(face-spec-set ',face ',spec))))
+                (cond
+                 ;; Top-level unquote: emit expression directly
+                 ((and (consp qval) (eq (car qval) '\,))
+                  `(face-spec-set ',face ,spec))
+                 ;; Quoted spec with nested unquote: use recursive sexp emitter
+                 ((rapid-package--contains-unquote-p spec)
+                  `(face-spec-set ',face ,(rapid-package--codegen-sexp spec)))
+                 ;; No unquote: quote directly (existing behavior)
+                 (t
+                  `(face-spec-set ',face ',spec)))))
             faces)))
 
 (defun rapid-package--codegen-bind-keymap-forms (keymaps)
