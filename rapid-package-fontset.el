@@ -141,7 +141,7 @@ CUSTOM-FACES is an optional list of normalized face plists."
     (if variable
         `(let* ,(mapcar (lambda (e)
                           (list (plist-get e :variable)
-                                (plist-get e :value)))
+                                (rapid-package--codegen-unquote (plist-get e :value))))
                         variable)
            ,@body-forms)
       `(progn ,@body-forms))))
