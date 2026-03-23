@@ -119,7 +119,7 @@ CUSTOM-FACES is an optional list of normalized face plists."
              rescale)))
          (default-forms
           (when default-p
-            `((set-frame-font ,name t)
+            `((set-frame-font ,name nil)
               (set-face-attribute 'default nil :font ,name)
               (setf (alist-get 'font default-frame-alist) ,name))))
          (custom-face-forms
