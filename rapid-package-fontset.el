@@ -90,7 +90,7 @@ CUSTOM-FACES is an optional list of normalized face plists."
          (fontset-name (concat "fontset-" name-str))
          (base-form    (rapid-package--codegen-unquote base))
          (base-spec    (if size
-                           `(font-spec :family ,base-form :size ,size)
+                           `(font-spec :family ,base-form :size ,(float size))
                          `(font-spec :family ,base-form)))
          (rule-forms
           (mapcar
