@@ -582,7 +582,7 @@ Map-local :bind (:map ...) alone does NOT trigger auto-defer."
         (rapid-package--codegen-bucket-append!
          buckets :install
          `(unless (package-installed-p ',pkg-name)
-            (package-vc-install ',vc-spec))))
+            (package-vc-install '(,pkg-name ,@vc-spec)))))
        (ensure-p
         (let ((target (if (and (symbolp ensure-p) (not (eq ensure-p t)))
                           ensure-p pkg-name)))
