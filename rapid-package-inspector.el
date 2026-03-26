@@ -28,6 +28,7 @@
 
 (require 'help-mode)
 (require 'package)
+(require 'imenu)
 
 ;;; Customization
 
@@ -385,189 +386,33 @@ All symbols are displayed as clickable buttons."
                    'face 'shadow))
           (insert "\n")
 
-          ;; User Options (with values)
-          (insert (propertize (format "User Options (%d):\n" (length user-options))
-                              'face 'italic))
-          (if (null user-options)
-              (insert "  (none)\n")
-            (dolist (var user-options)
-              (insert "  ")
-              (insert-button (symbol-name var)
-                             'type 'help-variable
-                             'help-args (list var))
+          ;; Collect section header positions for imenu
+          (let (imenu-positions)
 
-              ;; Add value preview
-              (condition-case _
-                  (let ((val (symbol-value var)))
-                    (insert (propertize 
-                             (format "  %s" 
-                                     (rapid-package-inspector--value-preview val var))
-                             'face 'shadow)))
-                (error 
-                 (insert (propertize "  <unbound>" 'face 'shadow))))
-
-              ;; Add status
-              (let ((status (rapid-package-inspector--symbol-status var)))
-                (unless (eq status 'loaded)
-                  (insert (propertize 
-                           (format " [%s]" status)
-                           'face 'shadow))))
-
-              ;; Add docstring first line
-              (when-let ((doc (documentation-property 
-                               var 'variable-documentation t)))
-                (insert (format "\n      %s" (rapid-package-inspector--first-line doc))))
-
-              (insert "\n")))
-          (insert "\n")
-
-          ;; Internal Variables (no values)
-          (insert (propertize (format "Internal Variables (%d):\n" (length internal-vars))
-                              'face 'italic))
-          (if (null internal-vars)
-              (insert "  (none)\n")
-            (dolist (var internal-vars)
-              (insert "  ")
-              (insert-button (symbol-name var)
-                             'type 'help-variable
-                             'help-args (list var))
-
-              ;; Add status
-              (let ((status (rapid-package-inspector--symbol-status var)))
-                (unless (eq status 'loaded)
-                  (insert (propertize 
-                           (format " [%s]" status)
-                           'face 'shadow))))
-
-              ;; Add docstring first line
-              (when-let ((doc (documentation-property 
-                               var 'variable-documentation t)))
-                (insert (format "\n      %s" (rapid-package-inspector--first-line doc))))
-
-              (insert "\n")))
-          (insert "\n")
-
-          ;; Commands
-          (insert (propertize (format "Commands (%d):\n" (length cmds))
-                              'face 'italic))
-          (if (null cmds)
-              (insert "  (none)\n")
-            (dolist (cmd cmds)
-              (insert "  ")
-              (insert-button (symbol-name cmd)
-                             'type 'help-function
-                             'help-args (list cmd))
-
-              ;; Add keybinding if available
-              (when-let ((keys (where-is-internal cmd)))
-                (insert (propertize 
-                         (format "  %s" 
-                                 (mapconcat #'key-description 
-                                            (seq-take keys 2)  ; Show max 2 bindings
-                                            ", "))
-                         'face 'shadow)))
-
-              ;; Add status
-              (let ((status (rapid-package-inspector--symbol-status cmd)))
-                (insert (propertize 
-                         (format " [%s]" status)
-                         'face 'shadow)))
-
-              ;; Add docstring first line
-              (when-let ((doc (documentation cmd t)))
-                (insert (format "\n      %s" (rapid-package-inspector--first-line doc))))
-
-              (insert "\n")))
-          (insert "\n")
-
-          ;; Hooks
-          (insert (propertize (format "Hooks (%d):\n" (length hooks))
-                              'face 'italic))
-          (if (null hooks)
-              (insert "  (none)\n")
-            (dolist (hook hooks)
-              (insert "  ")
-              (insert-button (symbol-name hook)
-                             'type 'help-variable
-                             'help-args (list hook))
-
-              ;; Add status
-              (let ((status (rapid-package-inspector--symbol-status hook)))
-                (unless (eq status 'loaded)
-                  (insert (propertize 
-                           (format " [%s]" status)
-                           'face 'shadow))))
-
-              ;; Add docstring first line
-              (when-let ((doc (documentation-property 
-                               hook 'variable-documentation t)))
-                (insert (format "\n      %s" (rapid-package-inspector--first-line doc))))
-
-              (insert "\n")))
-          (insert "\n")
-
-          ;; Modes and maps (if enabled)
-          (when rapid-package-inspector-include-modes-and-maps
-            (insert (propertize (format "Major modes (%d):\n" (length major))
+            ;; User Options (with values)
+            (push (cons "User Options" (point-marker)) imenu-positions)
+            (insert (propertize (format "User Options (%d):\n" (length user-options))
                                 'face 'italic))
-            (if (null major)
+            (if (null user-options)
                 (insert "  (none)\n")
-              (dolist (m major)
+              (dolist (var user-options)
                 (insert "  ")
-                (insert-button (symbol-name m)
-                               'type 'help-function
-                               'help-args (list m))
-
-                ;; Add status
-                (let ((status (rapid-package-inspector--symbol-status m)))
-                  (unless (eq status 'loaded)
-                    (insert (propertize 
-                             (format " [%s]" status)
-                             'face 'shadow))))
-
-                ;; Add docstring first line
-                (when-let ((doc (documentation m t)))
-                  (insert (format "\n      %s" (rapid-package-inspector--first-line doc))))
-
-                (insert "\n")))
-            (insert "\n")
-
-            (insert (propertize (format "Minor modes (%d):\n" (length minor))
-                                'face 'italic))
-            (if (null minor)
-                (insert "  (none)\n")
-              (dolist (m minor)
-                (insert "  ")
-                (insert-button (symbol-name m)
-                               'type 'help-function
-                               'help-args (list m))
-
-                ;; Add status
-                (let ((status (rapid-package-inspector--symbol-status m)))
-                  (unless (eq status 'loaded)
-                    (insert (propertize 
-                             (format " [%s]" status)
-                             'face 'shadow))))
-
-                ;; Add docstring first line
-                (when-let ((doc (documentation m t)))
-                  (insert (format "\n      %s" (rapid-package-inspector--first-line doc))))
-
-                (insert "\n")))
-            (insert "\n")
-
-            (insert (propertize (format "Keymaps (%d):\n" (length maps))
-                                'face 'italic))
-            (if (null maps)
-                (insert "  (none)\n")
-              (dolist (km maps)
-                (insert "  ")
-                (insert-button (symbol-name km)
+                (insert-button (symbol-name var)
                                'type 'help-variable
-                               'help-args (list km))
+                               'help-args (list var))
+
+                ;; Add value preview
+                (condition-case _
+                    (let ((val (symbol-value var)))
+                      (insert (propertize 
+                               (format "  %s" 
+                                       (rapid-package-inspector--value-preview val var))
+                               'face 'shadow)))
+                  (error 
+                   (insert (propertize "  <unbound>" 'face 'shadow))))
 
                 ;; Add status
-                (let ((status (rapid-package-inspector--symbol-status km)))
+                (let ((status (rapid-package-inspector--symbol-status var)))
                   (unless (eq status 'loaded)
                     (insert (propertize 
                              (format " [%s]" status)
@@ -575,11 +420,182 @@ All symbols are displayed as clickable buttons."
 
                 ;; Add docstring first line
                 (when-let ((doc (documentation-property 
-                                 km 'variable-documentation t)))
+                                 var 'variable-documentation t)))
                   (insert (format "\n      %s" (rapid-package-inspector--first-line doc))))
 
                 (insert "\n")))
-            (insert "\n")))))))
+            (insert "\n")
+
+            ;; Internal Variables (no values)
+            (push (cons "Internal Variables" (point-marker)) imenu-positions)
+            (insert (propertize (format "Internal Variables (%d):\n" (length internal-vars))
+                                'face 'italic))
+            (if (null internal-vars)
+                (insert "  (none)\n")
+              (dolist (var internal-vars)
+                (insert "  ")
+                (insert-button (symbol-name var)
+                               'type 'help-variable
+                               'help-args (list var))
+
+                ;; Add status
+                (let ((status (rapid-package-inspector--symbol-status var)))
+                  (unless (eq status 'loaded)
+                    (insert (propertize 
+                             (format " [%s]" status)
+                             'face 'shadow))))
+
+                ;; Add docstring first line
+                (when-let ((doc (documentation-property 
+                                 var 'variable-documentation t)))
+                  (insert (format "\n      %s" (rapid-package-inspector--first-line doc))))
+
+                (insert "\n")))
+            (insert "\n")
+
+            ;; Commands
+            (push (cons "Commands" (point-marker)) imenu-positions)
+            (insert (propertize (format "Commands (%d):\n" (length cmds))
+                                'face 'italic))
+            (if (null cmds)
+                (insert "  (none)\n")
+              (dolist (cmd cmds)
+                (insert "  ")
+                (insert-button (symbol-name cmd)
+                               'type 'help-function
+                               'help-args (list cmd))
+
+                ;; Add keybinding if available
+                (when-let ((keys (where-is-internal cmd)))
+                  (insert (propertize 
+                           (format "  %s" 
+                                   (mapconcat #'key-description 
+                                              (seq-take keys 2)  ; Show max 2 bindings
+                                              ", "))
+                           'face 'shadow)))
+
+                ;; Add status
+                (let ((status (rapid-package-inspector--symbol-status cmd)))
+                  (insert (propertize 
+                           (format " [%s]" status)
+                           'face 'shadow)))
+
+                ;; Add docstring first line
+                (when-let ((doc (documentation cmd t)))
+                  (insert (format "\n      %s" (rapid-package-inspector--first-line doc))))
+
+                (insert "\n")))
+            (insert "\n")
+
+            ;; Hooks
+            (push (cons "Hooks" (point-marker)) imenu-positions)
+            (insert (propertize (format "Hooks (%d):\n" (length hooks))
+                                'face 'italic))
+            (if (null hooks)
+                (insert "  (none)\n")
+              (dolist (hook hooks)
+                (insert "  ")
+                (insert-button (symbol-name hook)
+                               'type 'help-variable
+                               'help-args (list hook))
+
+                ;; Add status
+                (let ((status (rapid-package-inspector--symbol-status hook)))
+                  (unless (eq status 'loaded)
+                    (insert (propertize 
+                             (format " [%s]" status)
+                             'face 'shadow))))
+
+                ;; Add docstring first line
+                (when-let ((doc (documentation-property 
+                                 hook 'variable-documentation t)))
+                  (insert (format "\n      %s" (rapid-package-inspector--first-line doc))))
+
+                (insert "\n")))
+            (insert "\n")
+
+            ;; Modes and maps (if enabled)
+            (when rapid-package-inspector-include-modes-and-maps
+              (push (cons "Major modes" (point-marker)) imenu-positions)
+              (insert (propertize (format "Major modes (%d):\n" (length major))
+                                  'face 'italic))
+              (if (null major)
+                  (insert "  (none)\n")
+                (dolist (m major)
+                  (insert "  ")
+                  (insert-button (symbol-name m)
+                                 'type 'help-function
+                                 'help-args (list m))
+
+                  ;; Add status
+                  (let ((status (rapid-package-inspector--symbol-status m)))
+                    (unless (eq status 'loaded)
+                      (insert (propertize 
+                               (format " [%s]" status)
+                               'face 'shadow))))
+
+                  ;; Add docstring first line
+                  (when-let ((doc (documentation m t)))
+                    (insert (format "\n      %s" (rapid-package-inspector--first-line doc))))
+
+                  (insert "\n")))
+              (insert "\n")
+
+              (push (cons "Minor modes" (point-marker)) imenu-positions)
+              (insert (propertize (format "Minor modes (%d):\n" (length minor))
+                                  'face 'italic))
+              (if (null minor)
+                  (insert "  (none)\n")
+                (dolist (m minor)
+                  (insert "  ")
+                  (insert-button (symbol-name m)
+                                 'type 'help-function
+                                 'help-args (list m))
+
+                  ;; Add status
+                  (let ((status (rapid-package-inspector--symbol-status m)))
+                    (unless (eq status 'loaded)
+                      (insert (propertize 
+                               (format " [%s]" status)
+                               'face 'shadow))))
+
+                  ;; Add docstring first line
+                  (when-let ((doc (documentation m t)))
+                    (insert (format "\n      %s" (rapid-package-inspector--first-line doc))))
+
+                  (insert "\n")))
+              (insert "\n")
+
+              (push (cons "Keymaps" (point-marker)) imenu-positions)
+              (insert (propertize (format "Keymaps (%d):\n" (length maps))
+                                  'face 'italic))
+              (if (null maps)
+                  (insert "  (none)\n")
+                (dolist (km maps)
+                  (insert "  ")
+                  (insert-button (symbol-name km)
+                                 'type 'help-variable
+                                 'help-args (list km))
+
+                  ;; Add status
+                  (let ((status (rapid-package-inspector--symbol-status km)))
+                    (unless (eq status 'loaded)
+                      (insert (propertize 
+                               (format " [%s]" status)
+                               'face 'shadow))))
+
+                  ;; Add docstring first line
+                  (when-let ((doc (documentation-property 
+                                   km 'variable-documentation t)))
+                    (insert (format "\n      %s" (rapid-package-inspector--first-line doc))))
+
+                  (insert "\n")))
+              (insert "\n"))
+
+            ;; Register section positions as imenu index
+            (let ((idx (nreverse imenu-positions)))
+              (setq-local imenu-create-index-function
+                          (lambda () idx)))))))))
 
 (provide 'rapid-package-inspector)
 
