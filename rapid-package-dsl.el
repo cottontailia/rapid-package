@@ -107,15 +107,24 @@ Returns a plist:
 (defun rapid-package-dsl--normalize-alist-item (item)
   "Normalize an alist ITEM to plist format.
 
-Handles:
+Handles plain variable entries:
   - (var . val)
   - (var val)
   - (var val \"description\")
 
+Handles nested alist path entries (car is a cons or list):
+  - ((var . key) . val)          ; cons path spec, dotted value
+  - ((var . key) val)            ; cons path spec
+  - ((var key1 key2) val)        ; list path spec, multiple keys
+  - ((var key1 key2) val \"doc\") ; list path spec with description
+
+In path entries the :variable slot stores the path spec as-is
+(a cons or proper list).  The codegen layer interprets it.
+
 Values are processed through `rapid-package-dsl-quote' for proper
 unquote support.
 
-Returns: (:variable VAR :value VALUE [:description DOC])."
+Returns: (:variable VAR-OR-PATH :value VALUE [:description DOC])."
   (rapid-package-dsl--normalize-pair item :variable :value t))
 
 

@@ -274,13 +274,57 @@ PATH entries also sync `exec-path'."
            (_ (error "rapid-package--codegen-env-path-forms: unknown op %S" op)))))
      entries)))
 
+(defun rapid-package--codegen-alist-access-form (var keys)
+  "Build a nested (alist-get KEY ... VAR ... #\\='equal) form for KEYS path in VAR.
+Keys are looked up left-to-right; #\\='equal is used for all comparisons so
+both string and symbol keys are handled correctly."
+  (cl-reduce (lambda (acc key) `(alist-get ,key ,acc nil nil #'equal))
+             keys
+             :initial-value var))
+
+(defun rapid-package--codegen-alist-path-setf (target keys val)
+  "Return a form that sets TARGET[KEYS...] = VAL using setf + alist-get.
+For a single key, emits a plain setf.  For multiple keys, emits a progn
+that first ensures each intermediate alist level exists (creating it as nil
+if absent) and then performs the final setf."
+  (if (null (cdr keys))
+      ;; Single key: alist-get setf creates the entry if absent.
+      `(setf ,(rapid-package--codegen-alist-access-form target keys) ,val)
+    ;; Multiple keys: ensure each intermediate level before the final setf.
+    (let ((forms nil))
+      (cl-loop for i from 0 to (- (length keys) 2)
+               do (let* ((key    (nth i keys))
+                         (parent (rapid-package--codegen-alist-access-form
+                                  target (seq-take keys i)))
+                         (place  (rapid-package--codegen-alist-access-form
+                                  target (seq-take keys (1+ i)))))
+                    (push `(unless (assoc ,key ,parent)
+                             (setf ,place nil))
+                          forms)))
+      (push `(setf ,(rapid-package--codegen-alist-access-form target keys) ,val)
+            forms)
+      `(progn ,@(nreverse forms)))))
+
 (defun rapid-package--codegen-variable-forms (pairs &optional use-default)
-  "Return setq (or setq-default if USE-DEFAULT) forms for normalized PAIRS."
+  "Return setq/setq-default/setf forms for normalized PAIRS.
+When a pair's :variable is a cons (PATH-SPEC . nil-or-keys), the form
+sets a nested alist entry via setf + alist-get instead of plain setq.
+PATH-SPEC is (TARGET KEY...) or (TARGET . KEY); USE-DEFAULT is ignored
+for the alist-path case."
   (when pairs
     (mapcar (lambda (entry)
               (let ((var (plist-get entry :variable))
                     (val (rapid-package--codegen-unquote (plist-get entry :value))))
-                (if use-default `(setq-default ,var ,val) `(setq ,var ,val))))
+                (if (consp var)
+                    (let* ((target   (car var))
+                           (keys-raw (cdr var))
+                           (keys     (if (listp keys-raw)
+                                         keys-raw
+                                       (list keys-raw))))
+                      (rapid-package--codegen-alist-path-setf target keys val))
+                  (if use-default
+                      `(setq-default ,var ,val)
+                    `(setq ,var ,val)))))
             pairs)))
 
 (defun rapid-package--codegen-unbind-forms (groups)
