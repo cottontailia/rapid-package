@@ -164,7 +164,6 @@ Each group's BINDINGS-KEY sub-list is converted from a tl to a plain list."
 
 ITEM may be:
   - A single binding form: (KEY COMMAND ...)
-  - A list of binding/map forms: ((KEY CMD ...) (:map MAPS ...) ...)
   - A (:map MAPS ...) form
 
 Returns (NEW-ACC . REMAINING-ARGS).
@@ -226,25 +225,13 @@ item via `rapid-package-dsl--finalize-groups'."
              (dolist (b rest)
                (when (and (consp b) (eq (car b) :map))
                  (error "syntax error: nested :map not allowed"))
-               (add-binding maps b))))
-
-         (consume-container (lst)
-           (dolist (elem lst)
-             (cond
-              ((and (consp elem) (eq (car elem) :map))
-               (consume-map-form elem))
-              ((binding-p elem)
-               (add-binding '() elem))
-              (t
-               (error "syntax error: invalid :bind entry: %S" lst))))))
+               (add-binding maps b)))))
 
       (cond
        ((and (consp item) (eq (car item) :map))
         (consume-map-form item))
        ((binding-p item)
         (add-binding '() item))
-       ((listp item)
-        (consume-container item))
        (t
         (error "syntax error: invalid :bind entry: %S" item)))
 
@@ -293,11 +280,6 @@ Insertion order of both groups and keys is preserved."
               (error "syntax error: nested :map not allowed"))
             (add-key maps k))))
 
-       ((and (listp item)
-             (cl-every #'valid-key-p item))
-        (dolist (k item)
-          (add-key '() k)))
-
        ((valid-key-p item)
         (add-key '() item))
 
@@ -318,9 +300,6 @@ Accepts the following forms (repeated :hook keywords merge):
     :hook (prog-mode my-fn)              ; list
     :hook ((prog-mode text-mode) . my-fn) ; multi-mode dotted
     :hook ((prog-mode text-mode) my-fn)  ; multi-mode list
-
-  Container list (multiple entries at once):
-    :hook ((prog-mode . my-fn) (text-mode . other-fn))
 
 FN must be a plain symbol or a #\\='SYMBOL form.
 Lambda forms are not accepted; use :init/:config for anonymous hooks.
@@ -343,19 +322,9 @@ IR: a flat list of entry plists after finalization:
            (rapid-package--tl-append!
             tl (rapid-package-dsl--normalize-hook e))))
 
-      (cond
-       ;; Container: a list whose elements are themselves entries
-       ((and (listp item)
-             (not (single-entry-p item))
-             (cl-every #'single-entry-p item))
-        (dolist (e item) (add-entry e)))
-
-       ;; Single entry
-       ((single-entry-p item)
-        (add-entry item))
-
-       (t
-        (error "syntax error: invalid :hook entry: %S" item))))
+      (if (single-entry-p item)
+          (add-entry item)
+        (error "syntax error: invalid :hook entry: %S" item)))
 
     (cons tl args)))
 
@@ -685,14 +654,9 @@ Accepted ITEM forms:
   (PATTERN MODE)                 - explicit mode
   (PATTERN . MODE)               - dotted pair form
   (PATTERN MODE \"doc\")          - with description
-  ((PAT MODE) ...)               - container list of entries
 Returns (NEW-ACC . REMAINING-ARGS)."
   (let ((tl (or current-acc (rapid-package--tl-new))))
-    (if (and (consp item)
-             (consp (car item)))
-        (dolist (entry item)
-          (rapid-package--tl-append! tl (rapid-package-dsl--normalize-mode-item entry)))
-      (rapid-package--tl-append! tl (rapid-package-dsl--normalize-mode-item item)))
+    (rapid-package--tl-append! tl (rapid-package-dsl--normalize-mode-item item))
     (cons tl args)))
 
 (defun rapid-package-dsl-parse-interpreter (item args _current-key current-acc)
@@ -701,14 +665,9 @@ Accepted ITEM forms:
   (INTERPRETER MODE)             - explicit mode
   (INTERPRETER . MODE)           - dotted pair form
   (INTERPRETER MODE \"doc\")      - with description
-  ((INTERP MODE) ...)            - container list of entries
 Returns (NEW-ACC . REMAINING-ARGS)."
   (let ((tl (or current-acc (rapid-package--tl-new))))
-    (if (and (consp item)
-             (consp (car item)))
-        (dolist (entry item)
-          (rapid-package--tl-append! tl (rapid-package-dsl--normalize-interpreter-item entry)))
-      (rapid-package--tl-append! tl (rapid-package-dsl--normalize-interpreter-item item)))
+    (rapid-package--tl-append! tl (rapid-package-dsl--normalize-interpreter-item item))
     (cons tl args)))
 
 (defun rapid-package-dsl-parse-magic (item args _current-key current-acc)
@@ -717,14 +676,9 @@ Accepted ITEM forms:
   (MAGIC MODE)                   - explicit mode
   (MAGIC . MODE)                 - dotted pair form
   (MAGIC MODE \"doc\")            - with description
-  ((MAGIC MODE) ...)             - container list of entries
 Returns (NEW-ACC . REMAINING-ARGS)."
   (let ((tl (or current-acc (rapid-package--tl-new))))
-    (if (and (consp item)
-             (consp (car item)))
-        (dolist (entry item)
-          (rapid-package--tl-append! tl (rapid-package-dsl--normalize-magic-item entry)))
-      (rapid-package--tl-append! tl (rapid-package-dsl--normalize-magic-item item)))
+    (rapid-package--tl-append! tl (rapid-package-dsl--normalize-magic-item item))
     (cons tl args)))
 
 ;;; :env parser
@@ -769,33 +723,19 @@ Returns: (:variable VAR :value VALUE [:description DOC])."
   "Parse an :env ITEM and accumulate into CURRENT-ACC.
 
 Accepted ITEM forms:
-  (VAR . VALUE)                   – single entry, dotted pair
-  (VAR VALUE)                     – single entry, list form
-  (VAR VALUE DOC)                 – single entry with description
-  ((VAR1 . VAL1) (VAR2 VAL2) ...) – multiple entries
+  (VAR . VALUE)                   – dotted pair
+  (VAR VALUE)                     – list form
+  (VAR VALUE DOC)                 – list form with description
 
 VAR must be a string.  VALUE must be a string or nil (nil = unset).
 Multiple :env occurrences are merged in declaration order.
 
 Returns (NEW-ACC . REMAINING-ARGS)."
   (let ((tl (or current-acc (rapid-package--tl-new))))
-    (cond
-     ;; Container list: ((VAR . VAL) ...)
-     ((and (consp item)
-           (consp (car item))
-           (stringp (caar item)))
-      (dolist (entry item)
+    (if (and (consp item) (stringp (car item)))
         (rapid-package--tl-append!
-         tl (rapid-package-dsl--normalize-env-item entry))))
-
-     ;; Single entry
-     ((and (consp item) (stringp (car item)))
-      (rapid-package--tl-append!
-       tl (rapid-package-dsl--normalize-env-item item)))
-
-     (t
-      (error "syntax error: invalid :env value: %S" item)))
-
+         tl (rapid-package-dsl--normalize-env-item item))
+      (error "syntax error: invalid :env value: %S" item))
     (cons tl args)))
 
 ;;; :env-path parser

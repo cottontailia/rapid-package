@@ -45,8 +45,8 @@
 ;;   (rapid-package magit
 ;;     "Git interface"
 ;;     :ensure t
-;;     :variable ((magit-save-repository-buffers \\='dontask
-;;                 "Save buffers without asking"))
+;;     :variable (magit-save-repository-buffers \\='dontask
+;;                "Save buffers without asking")
 ;;     :bind (("C-x g" . magit-status))
 ;;     :custom-face
 ;;     (magit-diff-added ((t (:foreground \"green\")))))
@@ -799,8 +799,8 @@ Example:
   (rapid-package magit
     \"Git interface\"
     :ensure t
-    :variable ((magit-save-repository-buffers \\='dontask
-                \"Save buffers without asking\"))
+    :variable (magit-save-repository-buffers \\='dontask
+               \"Save buffers without asking\")
     :bind ((\"C-x g\" . magit-status))
     :hook (magit-mode . magit-auto-revert-mode)
     :config

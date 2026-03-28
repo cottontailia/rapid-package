@@ -310,24 +310,8 @@ the head list for other accumulators."
                ;; alist: normalize each entry, O(1) via tail tracking
                ((eq current-type 'alist)
                 (cond
-                 ;; Container list: ((k1 . v1) (k2 . v2) ...)
-                 ;; Exclude unquote forms (\, EXPR) as car -- those are single pairs.
-                 ;; Require a proper list where every element is a cons so that
-                 ;; nested alist path entries ((var key) val [doc]) are not
-                 ;; mistakenly treated as a container.
-                 ((and (proper-list-p item)
-                       (consp (car item))
-                       (not (keywordp (car (car item))))
-                       (not (eq (car (car item)) '\,))
-                       (cl-every #'consp item))
-                  (dolist (pair item)
-                    (if (consp pair)
-                        (append-to-key
-                         (rapid-package-dsl--normalize-alist-item pair))
-                      (error "syntax error: invalid entry for keyword %S: %S"
-                             current-key pair))))
-
-                 ;; Single pair
+                 ;; Single pair — covers both plain (var . val) / (var val [doc])
+                 ;; and nested alist path entries ((var key...) val [doc]).
                  ((consp item)
                   (append-to-key
                    (rapid-package-dsl--normalize-alist-item item)))
