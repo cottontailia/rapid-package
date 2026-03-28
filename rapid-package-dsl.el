@@ -312,10 +312,14 @@ the head list for other accumulators."
                 (cond
                  ;; Container list: ((k1 . v1) (k2 . v2) ...)
                  ;; Exclude unquote forms (\, EXPR) as car -- those are single pairs.
-                 ((and (listp item)
+                 ;; Require a proper list where every element is a cons so that
+                 ;; nested alist path entries ((var key) val [doc]) are not
+                 ;; mistakenly treated as a container.
+                 ((and (proper-list-p item)
                        (consp (car item))
                        (not (keywordp (car (car item))))
-                       (not (eq (car (car item)) '\,)))
+                       (not (eq (car (car item)) '\,))
+                       (cl-every #'consp item))
                   (dolist (pair item)
                     (if (consp pair)
                         (append-to-key
