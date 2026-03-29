@@ -195,12 +195,23 @@ so the output uses #\\=' for proper compile-time function resolution."
       (rapid-package--tl-value tl))))
 
 (defun rapid-package--codegen-custom-forms (customs)
-  "Return customize-set-variable forms for normalized CUSTOMS."
+  "Return customize-set-variable forms for normalized CUSTOMS.
+When an entry's :variable is a cons (path spec), generates a let form
+that deep-copies the target variable, updates the nested path on the copy
+via setf + alist-get, then calls customize-set-variable with the copy."
   (when customs
     (mapcar (lambda (entry)
-              `(customize-set-variable ',(plist-get entry :variable)
-                                       ,(rapid-package--codegen-unquote
-                                         (plist-get entry :value))))
+              (let ((var (plist-get entry :variable))
+                    (val (rapid-package--codegen-unquote
+                          (plist-get entry :value))))
+                (if (consp var)
+                    (let* ((target   (car var))
+                           (keys-raw (cdr var))
+                           (keys     (if (listp keys-raw)
+                                         keys-raw
+                                       (list keys-raw))))
+                      (rapid-package--codegen-alist-path-customize target keys val))
+                  `(customize-set-variable ',var ,val))))
             customs)))
 
 (defun rapid-package--codegen-custom-face-forms (faces)
@@ -304,6 +315,20 @@ if absent) and then performs the final setf."
       (push `(setf ,(rapid-package--codegen-alist-access-form target keys) ,val)
             forms)
       `(progn ,@(nreverse forms)))))
+
+(defun rapid-package--codegen-alist-path-customize (target keys val)
+  "Return a form that calls customize-set-variable on TARGET after
+setting TARGET[KEYS...] = VAL on a deep copy of TARGET.
+Reuses `rapid-package--codegen-alist-path-setf' on the copy symbol,
+then wraps the result in a let binding with copy-tree."
+  (let* ((copy      (make-symbol "--rapid-package--copy"))
+         (setf-form (rapid-package--codegen-alist-path-setf copy keys val))
+         (body      (if (eq (car-safe setf-form) 'progn)
+                        (cdr setf-form)
+                      (list setf-form))))
+    `(let ((,copy (copy-tree ,target)))
+       ,@body
+       (customize-set-variable ',target ,copy))))
 
 (defun rapid-package--codegen-variable-forms (pairs &optional use-default)
   "Return setq/setq-default/setf forms for normalized PAIRS.
