@@ -1848,15 +1848,12 @@ Anything else                             -> delegate to
     ;; List - convert to vector (check what kind of list it is)
     (let ((tl (rapid-package--tl-new)))
       (cond
-       ;; List of symbols -> convert each and create vector
-       ((and (cl-every #'symbolp value) (not (null value)))
+       ;; Atom list (all symbols and/or strings): path specs and simple lists.
+       ;; Covers symbol-only, string-only, and mixed (e.g. alist path specs).
+       ((cl-every (lambda (x) (or (symbolp x) (stringp x))) value)
         (dolist (item value)
           (rapid-package--tl-append! tl (rapid-package-json--normalize-lisp-value item))))
-       ;; List of strings -> convert each and create vector
-       ((and (cl-every #'stringp value) (not (null value)))
-        (dolist (item value)
-          (rapid-package--tl-append! tl (rapid-package-json--normalize-lisp-value item))))
-       ;; Body forms -> format with indentation
+       ;; Body forms (contain cons/list elements) -> format with indentation
        (t
         (dolist (item value)
           (rapid-package--tl-append! tl (rapid-package-json--format-form item)))))
