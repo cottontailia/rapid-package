@@ -142,11 +142,14 @@ BINDINGS-KEY is :bind or :unbind.  The group plist has the form
 
 (defun rapid-package-dsl--finalize-groups (groups bindings-key)
   "Convert tail-tracked group-list GROUPS to the external IR format.
-Each group's BINDINGS-KEY sub-list is converted from a tl to a plain list."
+Each group's BINDINGS-KEY sub-list is converted from a tl to a plain list.
+Groups with nil :map (global bindings) omit the :map key entirely."
   (mapcar (lambda (g)
-            (list :map (plist-get g :map)
-                  bindings-key
-                  (rapid-package--tl-value (plist-get g bindings-key))))
+            (let ((maps     (plist-get g :map))
+                  (bindings (rapid-package--tl-value (plist-get g bindings-key))))
+              (if maps
+                  (list :map maps bindings-key bindings)
+                (list bindings-key bindings))))
           (rapid-package--tl-value groups)))
 
 (defun rapid-package-dsl--finalize-bind (acc)
