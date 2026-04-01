@@ -92,6 +92,7 @@ Lambda forms are rejected.  CONTEXT is used in the error message."
 
 Handles (mode . fn), (mode fn), ((m1 m2) . fn), ((m1 m2) fn).
 FN is normalized via `rapid-package-dsl--normalize-fn'.
+MODE is stored as-is; -hook suffix is appended at code-generation time.
 
 Returns:
   - Single mode:    (:mode MODE :function FN)

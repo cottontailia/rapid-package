@@ -176,8 +176,20 @@ or a string (used as-is, for key-translation-map and similar uses)."
                 `(keymap-global-set ,key ,cmd-form)))))))
       (rapid-package--tl-value tl))))
 
+(defun rapid-package--hook-sym (mode)
+  "Return the hook variable symbol for MODE.
+If MODE already ends with `-hook' or `-functions', return it as-is.
+Otherwise append `-hook'."
+  (let ((name (symbol-name mode)))
+    (if (or (string-suffix-p "-hook" name)
+            (string-suffix-p "-functions" name))
+        mode
+      (intern (concat name "-hook")))))
+
 (defun rapid-package--codegen-hook-forms (hooks)
   "Return add-hook forms for normalized HOOKS.
+Each entry's :mode/:modes is a raw mode symbol; -hook suffix is
+appended here at code-generation time via `rapid-package--hook-sym'.
 Each entry's :function is a plain symbol (guaranteed by the parser),
 so the output uses #\\=' for proper compile-time function resolution."
   (when hooks
@@ -187,10 +199,12 @@ so the output uses #\\=' for proper compile-time function resolution."
          ((plist-get entry :modes)
           (dolist (mode (plist-get entry :modes))
             (rapid-package--tl-append!
-             tl `(add-hook ',mode #',(plist-get entry :function)))))
+             tl `(add-hook ',(rapid-package--hook-sym mode)
+                           #',(plist-get entry :function)))))
          ((plist-get entry :mode)
           (rapid-package--tl-append!
-           tl `(add-hook ',(plist-get entry :mode) #',(plist-get entry :function))))
+           tl `(add-hook ',(rapid-package--hook-sym (plist-get entry :mode))
+                         #',(plist-get entry :function))))
          (t (error "Invalid hook entry: %S" entry))))
       (rapid-package--tl-value tl))))
 
