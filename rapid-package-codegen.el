@@ -501,15 +501,15 @@ PREFIX is the function-name prefix string:
 Blocks use simplified IR with :target instead of :kind/:mode/:hook/:map.
 Kind, hook, and map are computed from :target at codegen time.
 
-Only :local and :hook subforms are handled here; :bind/:unbind/:mode/
+:local, :hook, and :config subforms are handled here; :bind/:unbind/:mode/
 :interpreter/:magic are normalized to top-level IR entries by the caller
 via rapid-package--with-expand-*.
 
-:kind :mode / :hook - generates defun + add-hook when :local or :hook is
-non-nil:
-  (defun FN () (setq-local VAR VAL) ... (FN1) (FN2) ...)
+:kind :mode / :hook - generates defun + add-hook when :local, :hook, or
+:config is non-nil:
+  (defun FN () (setq-local VAR VAL) ... (FN1) (FN2) ... FORM ...)
   (add-hook \\='HOOK #\\='FN)
-  Body order: :local (setq-local) then :hook (fn calls).
+  Body order: :local (setq-local), :hook (fn calls), :config (arbitrary forms).
 
 :kind :map - no forms emitted (all keymap forms are handled via
 expand-bindings/unbinds)."
@@ -521,8 +521,9 @@ expand-bindings/unbinds)."
                (kind   (plist-get info :kind))
                (hook   (plist-get info :hook))
                (id-sym (plist-get block :id))
-               (locals (plist-get block :local))
-               (hooks  (plist-get block :hook)))
+               (locals       (plist-get block :local))
+               (hooks        (plist-get block :hook))
+               (config-forms (plist-get block :config)))
           ;; :kind :map - nothing to emit here; bind/unbind handled by expand helpers.
           ;; :kind :mode / :hook - defun + add-hook only when body is non-empty.
           (unless (eq kind :map)
@@ -535,6 +536,9 @@ expand-bindings/unbinds)."
                                                           (plist-get entry :value)))))
               (dolist (fn hooks)
                 (rapid-package--tl-append! body-tl `(,fn)))
+              ;; :config forms run last, after :local and :hook
+              (dolist (form config-forms)
+                (rapid-package--tl-append! body-tl form))
               (let ((body-forms (rapid-package--tl-value body-tl)))
                 (when body-forms
                   (rapid-package--tl-append! tl `(defun ,fn-name () ,@body-forms))

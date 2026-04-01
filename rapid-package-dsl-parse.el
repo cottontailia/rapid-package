@@ -400,12 +400,15 @@ or :map (from `rapid-package-dsl--with-normalize-mode').  MODE-SYM is the
 original mode symbol, used in error messages.
 
 Allowed subforms by KIND:
-  :mode - :local, :hook, :bind, :unbind, :mode, :interpreter, :magic
-  :hook - :local and :hook only
+  :mode - :local, :hook, :config, :bind, :unbind, :mode, :interpreter, :magic
+  :hook - :local, :hook, :config
   :map  - :bind and :unbind only
 
 (:hook FN ...) adds (FN) calls to the generated defun body.
 Each FN must be a plain function symbol or #\\='SYMBOL form.
+
+(:config FORM ...) adds arbitrary Emacs Lisp forms to the generated defun body,
+after :local and :hook forms.  Not allowed for :map kind.
 
 (:mode PATTERN ...), (:interpreter INTERP ...), (:magic REGEXP ...) register
 entries in auto-mode-alist, interpreter-mode-alist, and magic-mode-alist
@@ -416,7 +419,8 @@ respectively.  The mode is inferred from the :with target symbol."
         (unbind-keys (rapid-package--tl-new))
         (mode-patterns (rapid-package--tl-new))
         (interpreter-patterns (rapid-package--tl-new))
-        (magic-patterns (rapid-package--tl-new)))
+        (magic-patterns (rapid-package--tl-new))
+        (config-forms (rapid-package--tl-new)))
     (dolist (sub subforms)
       (unless (and (consp sub) (keywordp (car sub)))
         (error "syntax error: :with subform must start with a keyword, got: %S" sub))
@@ -504,6 +508,14 @@ respectively.  The mode is inferred from the :with target symbol."
                   (if (eq kind :hook) "hook (*-hook)" "keymap (*-map)")
                   mode-sym))
          (rapid-package--tl-extend! magic-patterns (cdr sub)))
+        (:config
+         (when (eq kind :map)
+           (error "syntax error: :with :config is not allowed for a keymap (*-map) symbol: %S"
+                  mode-sym))
+         (let ((forms (cdr sub)))
+           (unless forms
+             (error "syntax error: :with :config requires at least one form"))
+           (rapid-package--tl-extend! config-forms forms)))
         (_
          (error "syntax error: unknown :with subform keyword %S" (car sub)))))
     (list :local (rapid-package--tl-value local-pairs)
@@ -512,7 +524,8 @@ respectively.  The mode is inferred from the :with target symbol."
           :unbind (rapid-package--tl-value unbind-keys)
           :mode (rapid-package--tl-value mode-patterns)
           :interpreter (rapid-package--tl-value interpreter-patterns)
-          :magic (rapid-package--tl-value magic-patterns))))
+          :magic (rapid-package--tl-value magic-patterns)
+          :config (rapid-package--tl-value config-forms))))
 
 (defun rapid-package-dsl--with-parse-block (mode-sym id-sym subforms)
   "Return a normalized :with IR plist for MODE-SYM with optional ID-SYM.
@@ -523,7 +536,7 @@ Simplified IR structure (only non-nil values included):
   (:target MODE [:id ID] [:local PAIRS] [:hook FNS]
                 [:bind PAIRS] [:unbind KEYS]
                 [:mode PATS] [:interpreter INTERPS]
-                [:magic MAGICS])
+                [:magic MAGICS] [:config FORMS])
 
 The kind, hook name, and map name are derived from :target at codegen time."
   (let* ((sub-ir (rapid-package-dsl--with-parse-subforms
@@ -547,6 +560,8 @@ The kind, hook name, and map name are derived from :target at codegen time."
       (setq result (plist-put result :interpreter pats)))
     (when-let ((pats (plist-get sub-ir :magic)))
       (setq result (plist-put result :magic pats)))
+    (when-let ((cfg (plist-get sub-ir :config)))
+      (setq result (plist-put result :config cfg)))
     result))
 
 (defun rapid-package-dsl-parse-with (item args _current-key current-acc)
@@ -566,13 +581,14 @@ The optional ID is a non-keyword, non-list symbol immediately after MODE.
 Multiple :with occurrences are merged.
 
 Behavior by MODE suffix:
-  plain  -> :local, :bind, :unbind allowed; generates defun + add-hook
-  *-hook -> :local only; generates defun + add-hook
+  plain  -> :local, :hook, :config, :bind, :unbind allowed;
+            generates defun + add-hook
+  *-hook -> :local, :hook, :config; generates defun + add-hook
   *-map  -> :bind and :unbind only; keymap forms emitted directly (no defun)
 
 IR per block:
   (:kind KIND :mode MODE :hook HOOK :map MAP :id ID
-   :local PAIRS :bind PAIRS :unbind KEYS)"
+   :local PAIRS :bind PAIRS :unbind KEYS :config FORMS)"
   (let ((tl (or current-acc (rapid-package--tl-new))))
 
     (cond
