@@ -5,7 +5,20 @@
 ;; Author: Cottontailia
 ;; Additional-Author: AI Assistant
 ;; URL: https://github.com/cottontailia/rapid-package
-;; License: CC0
+;; License: GPL-3.0-or-later
+
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+;;
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+;;
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 ;;; Commentary:
 
@@ -107,15 +120,24 @@ Returns a plist:
 (defun rapid-package-dsl--normalize-alist-item (item)
   "Normalize an alist ITEM to plist format.
 
-Handles:
+Handles plain variable entries:
   - (var . val)
   - (var val)
   - (var val \"description\")
 
+Handles nested alist path entries (car is a cons or list):
+  - ((var . key) . val)          ; cons path spec, dotted value
+  - ((var . key) val)            ; cons path spec
+  - ((var key1 key2) val)        ; list path spec, multiple keys
+  - ((var key1 key2) val \"doc\") ; list path spec with description
+
+In path entries the :variable slot stores the path spec as-is
+(a cons or proper list).  The codegen layer interprets it.
+
 Values are processed through `rapid-package-dsl-quote' for proper
 unquote support.
 
-Returns: (:variable VAR :value VALUE [:description DOC])."
+Returns: (:variable VAR-OR-PATH :value VALUE [:description DOC])."
   (rapid-package-dsl--normalize-pair item :variable :value t))
 
 
@@ -301,20 +323,8 @@ the head list for other accumulators."
                ;; alist: normalize each entry, O(1) via tail tracking
                ((eq current-type 'alist)
                 (cond
-                 ;; Container list: ((k1 . v1) (k2 . v2) ...)
-                 ;; Exclude unquote forms (\, EXPR) as car -- those are single pairs.
-                 ((and (listp item)
-                       (consp (car item))
-                       (not (keywordp (car (car item))))
-                       (not (eq (car (car item)) '\,)))
-                  (dolist (pair item)
-                    (if (consp pair)
-                        (append-to-key
-                         (rapid-package-dsl--normalize-alist-item pair))
-                      (error "syntax error: invalid entry for keyword %S: %S"
-                             current-key pair))))
-
-                 ;; Single pair
+                 ;; Single pair — covers both plain (var . val) / (var val [doc])
+                 ;; and nested alist path entries ((var key...) val [doc]).
                  ((consp item)
                   (append-to-key
                    (rapid-package-dsl--normalize-alist-item item)))

@@ -5,7 +5,20 @@
 ;; Author: Cottontailia
 ;; Additional-Author: AI Assistant
 ;; URL: https://github.com/cottontailia/rapid-package
-;; License: CC0
+;; License: GPL-3.0-or-later
+
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+;;
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+;;
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 ;;; Commentary:
 
@@ -92,6 +105,7 @@ Lambda forms are rejected.  CONTEXT is used in the error message."
 
 Handles (mode . fn), (mode fn), ((m1 m2) . fn), ((m1 m2) fn).
 FN is normalized via `rapid-package-dsl--normalize-fn'.
+MODE is stored as-is; -hook suffix is appended at code-generation time.
 
 Returns:
   - Single mode:    (:mode MODE :function FN)
@@ -142,11 +156,14 @@ BINDINGS-KEY is :bind or :unbind.  The group plist has the form
 
 (defun rapid-package-dsl--finalize-groups (groups bindings-key)
   "Convert tail-tracked group-list GROUPS to the external IR format.
-Each group's BINDINGS-KEY sub-list is converted from a tl to a plain list."
+Each group's BINDINGS-KEY sub-list is converted from a tl to a plain list.
+Groups with nil :map (global bindings) omit the :map key entirely."
   (mapcar (lambda (g)
-            (list :map (plist-get g :map)
-                  bindings-key
-                  (rapid-package--tl-value (plist-get g bindings-key))))
+            (let ((maps     (plist-get g :map))
+                  (bindings (rapid-package--tl-value (plist-get g bindings-key))))
+              (if maps
+                  (list :map maps bindings-key bindings)
+                (list bindings-key bindings))))
           (rapid-package--tl-value groups)))
 
 (defun rapid-package-dsl--finalize-bind (acc)
@@ -164,7 +181,6 @@ Each group's BINDINGS-KEY sub-list is converted from a tl to a plain list."
 
 ITEM may be:
   - A single binding form: (KEY COMMAND ...)
-  - A list of binding/map forms: ((KEY CMD ...) (:map MAPS ...) ...)
   - A (:map MAPS ...) form
 
 Returns (NEW-ACC . REMAINING-ARGS).
@@ -226,25 +242,13 @@ item via `rapid-package-dsl--finalize-groups'."
              (dolist (b rest)
                (when (and (consp b) (eq (car b) :map))
                  (error "syntax error: nested :map not allowed"))
-               (add-binding maps b))))
-
-         (consume-container (lst)
-           (dolist (elem lst)
-             (cond
-              ((and (consp elem) (eq (car elem) :map))
-               (consume-map-form elem))
-              ((binding-p elem)
-               (add-binding '() elem))
-              (t
-               (error "syntax error: invalid :bind entry: %S" lst))))))
+               (add-binding maps b)))))
 
       (cond
        ((and (consp item) (eq (car item) :map))
         (consume-map-form item))
        ((binding-p item)
         (add-binding '() item))
-       ((listp item)
-        (consume-container item))
        (t
         (error "syntax error: invalid :bind entry: %S" item)))
 
@@ -293,11 +297,6 @@ Insertion order of both groups and keys is preserved."
               (error "syntax error: nested :map not allowed"))
             (add-key maps k))))
 
-       ((and (listp item)
-             (cl-every #'valid-key-p item))
-        (dolist (k item)
-          (add-key '() k)))
-
        ((valid-key-p item)
         (add-key '() item))
 
@@ -318,9 +317,6 @@ Accepts the following forms (repeated :hook keywords merge):
     :hook (prog-mode my-fn)              ; list
     :hook ((prog-mode text-mode) . my-fn) ; multi-mode dotted
     :hook ((prog-mode text-mode) my-fn)  ; multi-mode list
-
-  Container list (multiple entries at once):
-    :hook ((prog-mode . my-fn) (text-mode . other-fn))
 
 FN must be a plain symbol or a #\\='SYMBOL form.
 Lambda forms are not accepted; use :init/:config for anonymous hooks.
@@ -343,19 +339,9 @@ IR: a flat list of entry plists after finalization:
            (rapid-package--tl-append!
             tl (rapid-package-dsl--normalize-hook e))))
 
-      (cond
-       ;; Container: a list whose elements are themselves entries
-       ((and (listp item)
-             (not (single-entry-p item))
-             (cl-every #'single-entry-p item))
-        (dolist (e item) (add-entry e)))
-
-       ;; Single entry
-       ((single-entry-p item)
-        (add-entry item))
-
-       (t
-        (error "syntax error: invalid :hook entry: %S" item))))
+      (if (single-entry-p item)
+          (add-entry item)
+        (error "syntax error: invalid :hook entry: %S" item)))
 
     (cons tl args)))
 
@@ -427,12 +413,15 @@ or :map (from `rapid-package-dsl--with-normalize-mode').  MODE-SYM is the
 original mode symbol, used in error messages.
 
 Allowed subforms by KIND:
-  :mode - :local, :hook, :bind, :unbind, :mode, :interpreter, :magic
-  :hook - :local and :hook only
+  :mode - :local, :hook, :config, :bind, :unbind, :mode, :interpreter, :magic
+  :hook - :local, :hook, :config
   :map  - :bind and :unbind only
 
 (:hook FN ...) adds (FN) calls to the generated defun body.
 Each FN must be a plain function symbol or #\\='SYMBOL form.
+
+(:config FORM ...) adds arbitrary Emacs Lisp forms to the generated defun body,
+after :local and :hook forms.  Not allowed for :map kind.
 
 (:mode PATTERN ...), (:interpreter INTERP ...), (:magic REGEXP ...) register
 entries in auto-mode-alist, interpreter-mode-alist, and magic-mode-alist
@@ -443,7 +432,8 @@ respectively.  The mode is inferred from the :with target symbol."
         (unbind-keys (rapid-package--tl-new))
         (mode-patterns (rapid-package--tl-new))
         (interpreter-patterns (rapid-package--tl-new))
-        (magic-patterns (rapid-package--tl-new)))
+        (magic-patterns (rapid-package--tl-new))
+        (config-forms (rapid-package--tl-new)))
     (dolist (sub subforms)
       (unless (and (consp sub) (keywordp (car sub)))
         (error "syntax error: :with subform must start with a keyword, got: %S" sub))
@@ -531,6 +521,14 @@ respectively.  The mode is inferred from the :with target symbol."
                   (if (eq kind :hook) "hook (*-hook)" "keymap (*-map)")
                   mode-sym))
          (rapid-package--tl-extend! magic-patterns (cdr sub)))
+        (:config
+         (when (eq kind :map)
+           (error "syntax error: :with :config is not allowed for a keymap (*-map) symbol: %S"
+                  mode-sym))
+         (let ((forms (cdr sub)))
+           (unless forms
+             (error "syntax error: :with :config requires at least one form"))
+           (rapid-package--tl-extend! config-forms forms)))
         (_
          (error "syntax error: unknown :with subform keyword %S" (car sub)))))
     (list :local (rapid-package--tl-value local-pairs)
@@ -539,7 +537,8 @@ respectively.  The mode is inferred from the :with target symbol."
           :unbind (rapid-package--tl-value unbind-keys)
           :mode (rapid-package--tl-value mode-patterns)
           :interpreter (rapid-package--tl-value interpreter-patterns)
-          :magic (rapid-package--tl-value magic-patterns))))
+          :magic (rapid-package--tl-value magic-patterns)
+          :config (rapid-package--tl-value config-forms))))
 
 (defun rapid-package-dsl--with-parse-block (mode-sym id-sym subforms)
   "Return a normalized :with IR plist for MODE-SYM with optional ID-SYM.
@@ -550,7 +549,7 @@ Simplified IR structure (only non-nil values included):
   (:target MODE [:id ID] [:local PAIRS] [:hook FNS]
                 [:bind PAIRS] [:unbind KEYS]
                 [:mode PATS] [:interpreter INTERPS]
-                [:magic MAGICS])
+                [:magic MAGICS] [:config FORMS])
 
 The kind, hook name, and map name are derived from :target at codegen time."
   (let* ((sub-ir (rapid-package-dsl--with-parse-subforms
@@ -574,6 +573,8 @@ The kind, hook name, and map name are derived from :target at codegen time."
       (setq result (plist-put result :interpreter pats)))
     (when-let ((pats (plist-get sub-ir :magic)))
       (setq result (plist-put result :magic pats)))
+    (when-let ((cfg (plist-get sub-ir :config)))
+      (setq result (plist-put result :config cfg)))
     result))
 
 (defun rapid-package-dsl-parse-with (item args _current-key current-acc)
@@ -593,13 +594,14 @@ The optional ID is a non-keyword, non-list symbol immediately after MODE.
 Multiple :with occurrences are merged.
 
 Behavior by MODE suffix:
-  plain  -> :local, :bind, :unbind allowed; generates defun + add-hook
-  *-hook -> :local only; generates defun + add-hook
+  plain  -> :local, :hook, :config, :bind, :unbind allowed;
+            generates defun + add-hook
+  *-hook -> :local, :hook, :config; generates defun + add-hook
   *-map  -> :bind and :unbind only; keymap forms emitted directly (no defun)
 
 IR per block:
   (:kind KIND :mode MODE :hook HOOK :map MAP :id ID
-   :local PAIRS :bind PAIRS :unbind KEYS)"
+   :local PAIRS :bind PAIRS :unbind KEYS :config FORMS)"
   (let ((tl (or current-acc (rapid-package--tl-new))))
 
     (cond
@@ -685,14 +687,9 @@ Accepted ITEM forms:
   (PATTERN MODE)                 - explicit mode
   (PATTERN . MODE)               - dotted pair form
   (PATTERN MODE \"doc\")          - with description
-  ((PAT MODE) ...)               - container list of entries
 Returns (NEW-ACC . REMAINING-ARGS)."
   (let ((tl (or current-acc (rapid-package--tl-new))))
-    (if (and (consp item)
-             (consp (car item)))
-        (dolist (entry item)
-          (rapid-package--tl-append! tl (rapid-package-dsl--normalize-mode-item entry)))
-      (rapid-package--tl-append! tl (rapid-package-dsl--normalize-mode-item item)))
+    (rapid-package--tl-append! tl (rapid-package-dsl--normalize-mode-item item))
     (cons tl args)))
 
 (defun rapid-package-dsl-parse-interpreter (item args _current-key current-acc)
@@ -701,14 +698,9 @@ Accepted ITEM forms:
   (INTERPRETER MODE)             - explicit mode
   (INTERPRETER . MODE)           - dotted pair form
   (INTERPRETER MODE \"doc\")      - with description
-  ((INTERP MODE) ...)            - container list of entries
 Returns (NEW-ACC . REMAINING-ARGS)."
   (let ((tl (or current-acc (rapid-package--tl-new))))
-    (if (and (consp item)
-             (consp (car item)))
-        (dolist (entry item)
-          (rapid-package--tl-append! tl (rapid-package-dsl--normalize-interpreter-item entry)))
-      (rapid-package--tl-append! tl (rapid-package-dsl--normalize-interpreter-item item)))
+    (rapid-package--tl-append! tl (rapid-package-dsl--normalize-interpreter-item item))
     (cons tl args)))
 
 (defun rapid-package-dsl-parse-magic (item args _current-key current-acc)
@@ -717,14 +709,9 @@ Accepted ITEM forms:
   (MAGIC MODE)                   - explicit mode
   (MAGIC . MODE)                 - dotted pair form
   (MAGIC MODE \"doc\")            - with description
-  ((MAGIC MODE) ...)             - container list of entries
 Returns (NEW-ACC . REMAINING-ARGS)."
   (let ((tl (or current-acc (rapid-package--tl-new))))
-    (if (and (consp item)
-             (consp (car item)))
-        (dolist (entry item)
-          (rapid-package--tl-append! tl (rapid-package-dsl--normalize-magic-item entry)))
-      (rapid-package--tl-append! tl (rapid-package-dsl--normalize-magic-item item)))
+    (rapid-package--tl-append! tl (rapid-package-dsl--normalize-magic-item item))
     (cons tl args)))
 
 ;;; :env parser
@@ -769,33 +756,19 @@ Returns: (:variable VAR :value VALUE [:description DOC])."
   "Parse an :env ITEM and accumulate into CURRENT-ACC.
 
 Accepted ITEM forms:
-  (VAR . VALUE)                   – single entry, dotted pair
-  (VAR VALUE)                     – single entry, list form
-  (VAR VALUE DOC)                 – single entry with description
-  ((VAR1 . VAL1) (VAR2 VAL2) ...) – multiple entries
+  (VAR . VALUE)                   – dotted pair
+  (VAR VALUE)                     – list form
+  (VAR VALUE DOC)                 – list form with description
 
 VAR must be a string.  VALUE must be a string or nil (nil = unset).
 Multiple :env occurrences are merged in declaration order.
 
 Returns (NEW-ACC . REMAINING-ARGS)."
   (let ((tl (or current-acc (rapid-package--tl-new))))
-    (cond
-     ;; Container list: ((VAR . VAL) ...)
-     ((and (consp item)
-           (consp (car item))
-           (stringp (caar item)))
-      (dolist (entry item)
+    (if (and (consp item) (stringp (car item)))
         (rapid-package--tl-append!
-         tl (rapid-package-dsl--normalize-env-item entry))))
-
-     ;; Single entry
-     ((and (consp item) (stringp (car item)))
-      (rapid-package--tl-append!
-       tl (rapid-package-dsl--normalize-env-item item)))
-
-     (t
-      (error "syntax error: invalid :env value: %S" item)))
-
+         tl (rapid-package-dsl--normalize-env-item item))
+      (error "syntax error: invalid :env value: %S" item))
     (cons tl args)))
 
 ;;; :env-path parser

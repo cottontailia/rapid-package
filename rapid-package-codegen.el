@@ -5,7 +5,20 @@
 ;; Author: Cottontailia
 ;; Additional-Author: AI Assistant
 ;; URL: https://github.com/cottontailia/rapid-package
-;; License: CC0
+;; License: GPL-3.0-or-later
+
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+;;
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+;;
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 ;;; Commentary:
 ;;
@@ -176,8 +189,20 @@ or a string (used as-is, for key-translation-map and similar uses)."
                 `(keymap-global-set ,key ,cmd-form)))))))
       (rapid-package--tl-value tl))))
 
+(defun rapid-package--hook-sym (mode)
+  "Return the hook variable symbol for MODE.
+If MODE already ends with `-hook' or `-functions', return it as-is.
+Otherwise append `-hook'."
+  (let ((name (symbol-name mode)))
+    (if (or (string-suffix-p "-hook" name)
+            (string-suffix-p "-functions" name))
+        mode
+      (intern (concat name "-hook")))))
+
 (defun rapid-package--codegen-hook-forms (hooks)
   "Return add-hook forms for normalized HOOKS.
+Each entry's :mode/:modes is a raw mode symbol; -hook suffix is
+appended here at code-generation time via `rapid-package--hook-sym'.
 Each entry's :function is a plain symbol (guaranteed by the parser),
 so the output uses #\\=' for proper compile-time function resolution."
   (when hooks
@@ -187,20 +212,33 @@ so the output uses #\\=' for proper compile-time function resolution."
          ((plist-get entry :modes)
           (dolist (mode (plist-get entry :modes))
             (rapid-package--tl-append!
-             tl `(add-hook ',mode #',(plist-get entry :function)))))
+             tl `(add-hook ',(rapid-package--hook-sym mode)
+                           #',(plist-get entry :function)))))
          ((plist-get entry :mode)
           (rapid-package--tl-append!
-           tl `(add-hook ',(plist-get entry :mode) #',(plist-get entry :function))))
+           tl `(add-hook ',(rapid-package--hook-sym (plist-get entry :mode))
+                         #',(plist-get entry :function))))
          (t (error "Invalid hook entry: %S" entry))))
       (rapid-package--tl-value tl))))
 
 (defun rapid-package--codegen-custom-forms (customs)
-  "Return customize-set-variable forms for normalized CUSTOMS."
+  "Return customize-set-variable forms for normalized CUSTOMS.
+When an entry's :variable is a cons (path spec), generates a let form
+that deep-copies the target variable, updates the nested path on the copy
+via setf + alist-get, then calls customize-set-variable with the copy."
   (when customs
     (mapcar (lambda (entry)
-              `(customize-set-variable ',(plist-get entry :variable)
-                                       ,(rapid-package--codegen-unquote
-                                         (plist-get entry :value))))
+              (let ((var (plist-get entry :variable))
+                    (val (rapid-package--codegen-unquote
+                          (plist-get entry :value))))
+                (if (consp var)
+                    (let* ((target   (car var))
+                           (keys-raw (cdr var))
+                           (keys     (if (listp keys-raw)
+                                         keys-raw
+                                       (list keys-raw))))
+                      (rapid-package--codegen-alist-path-customize target keys val))
+                  `(customize-set-variable ',var ,val))))
             customs)))
 
 (defun rapid-package--codegen-custom-face-forms (faces)
@@ -274,13 +312,71 @@ PATH entries also sync `exec-path'."
            (_ (error "rapid-package--codegen-env-path-forms: unknown op %S" op)))))
      entries)))
 
+(defun rapid-package--codegen-alist-access-form (var keys)
+  "Build a nested (alist-get KEY ... VAR ... #\\='equal) form for KEYS path in VAR.
+Keys are looked up left-to-right; #\\='equal is used for all comparisons so
+both string and symbol keys are handled correctly."
+  (cl-reduce (lambda (acc key) `(alist-get ,key ,acc nil nil #'equal))
+             keys
+             :initial-value var))
+
+(defun rapid-package--codegen-alist-path-setf (target keys val)
+  "Return a form that sets TARGET[KEYS...] = VAL using setf + alist-get.
+For a single key, emits a plain setf.  For multiple keys, emits a progn
+that first ensures each intermediate alist level exists (creating it as nil
+if absent) and then performs the final setf."
+  (if (null (cdr keys))
+      ;; Single key: alist-get setf creates the entry if absent.
+      `(setf ,(rapid-package--codegen-alist-access-form target keys) ,val)
+    ;; Multiple keys: ensure each intermediate level before the final setf.
+    (let ((forms nil))
+      (cl-loop for i from 0 to (- (length keys) 2)
+               do (let* ((key    (nth i keys))
+                         (parent (rapid-package--codegen-alist-access-form
+                                  target (seq-take keys i)))
+                         (place  (rapid-package--codegen-alist-access-form
+                                  target (seq-take keys (1+ i)))))
+                    (push `(unless (assoc ,key ,parent)
+                             (setf ,place nil))
+                          forms)))
+      (push `(setf ,(rapid-package--codegen-alist-access-form target keys) ,val)
+            forms)
+      `(progn ,@(nreverse forms)))))
+
+(defun rapid-package--codegen-alist-path-customize (target keys val)
+  "Return a form that calls customize-set-variable on TARGET after
+setting TARGET[KEYS...] = VAL on a deep copy of TARGET.
+Reuses `rapid-package--codegen-alist-path-setf' on the copy symbol,
+then wraps the result in a let binding with copy-tree."
+  (let* ((copy      (make-symbol "--rapid-package--copy"))
+         (setf-form (rapid-package--codegen-alist-path-setf copy keys val))
+         (body      (if (eq (car-safe setf-form) 'progn)
+                        (cdr setf-form)
+                      (list setf-form))))
+    `(let ((,copy (copy-tree ,target)))
+       ,@body
+       (customize-set-variable ',target ,copy))))
+
 (defun rapid-package--codegen-variable-forms (pairs &optional use-default)
-  "Return setq (or setq-default if USE-DEFAULT) forms for normalized PAIRS."
+  "Return setq/setq-default/setf forms for normalized PAIRS.
+When a pair's :variable is a cons (PATH-SPEC . nil-or-keys), the form
+sets a nested alist entry via setf + alist-get instead of plain setq.
+PATH-SPEC is (TARGET KEY...) or (TARGET . KEY); USE-DEFAULT is ignored
+for the alist-path case."
   (when pairs
     (mapcar (lambda (entry)
               (let ((var (plist-get entry :variable))
                     (val (rapid-package--codegen-unquote (plist-get entry :value))))
-                (if use-default `(setq-default ,var ,val) `(setq ,var ,val))))
+                (if (consp var)
+                    (let* ((target   (car var))
+                           (keys-raw (cdr var))
+                           (keys     (if (listp keys-raw)
+                                         keys-raw
+                                       (list keys-raw))))
+                      (rapid-package--codegen-alist-path-setf target keys val))
+                  (if use-default
+                      `(setq-default ,var ,val)
+                    `(setq ,var ,val)))))
             pairs)))
 
 (defun rapid-package--codegen-unbind-forms (groups)
@@ -418,15 +514,15 @@ PREFIX is the function-name prefix string:
 Blocks use simplified IR with :target instead of :kind/:mode/:hook/:map.
 Kind, hook, and map are computed from :target at codegen time.
 
-Only :local and :hook subforms are handled here; :bind/:unbind/:mode/
+:local, :hook, and :config subforms are handled here; :bind/:unbind/:mode/
 :interpreter/:magic are normalized to top-level IR entries by the caller
 via rapid-package--with-expand-*.
 
-:kind :mode / :hook - generates defun + add-hook when :local or :hook is
-non-nil:
-  (defun FN () (setq-local VAR VAL) ... (FN1) (FN2) ...)
+:kind :mode / :hook - generates defun + add-hook when :local, :hook, or
+:config is non-nil:
+  (defun FN () (setq-local VAR VAL) ... (FN1) (FN2) ... FORM ...)
   (add-hook \\='HOOK #\\='FN)
-  Body order: :local (setq-local) then :hook (fn calls).
+  Body order: :local (setq-local), :hook (fn calls), :config (arbitrary forms).
 
 :kind :map - no forms emitted (all keymap forms are handled via
 expand-bindings/unbinds)."
@@ -438,8 +534,9 @@ expand-bindings/unbinds)."
                (kind   (plist-get info :kind))
                (hook   (plist-get info :hook))
                (id-sym (plist-get block :id))
-               (locals (plist-get block :local))
-               (hooks  (plist-get block :hook)))
+               (locals       (plist-get block :local))
+               (hooks        (plist-get block :hook))
+               (config-forms (plist-get block :config)))
           ;; :kind :map - nothing to emit here; bind/unbind handled by expand helpers.
           ;; :kind :mode / :hook - defun + add-hook only when body is non-empty.
           (unless (eq kind :map)
@@ -452,6 +549,9 @@ expand-bindings/unbinds)."
                                                           (plist-get entry :value)))))
               (dolist (fn hooks)
                 (rapid-package--tl-append! body-tl `(,fn)))
+              ;; :config forms run last, after :local and :hook
+              (dolist (form config-forms)
+                (rapid-package--tl-append! body-tl form))
               (let ((body-forms (rapid-package--tl-value body-tl)))
                 (when body-forms
                   (rapid-package--tl-append! tl `(defun ,fn-name () ,@body-forms))

@@ -8,7 +8,20 @@
 ;; Version: 0.5.0
 ;; Package-Requires: ((emacs "29.1") (cl-lib "0.5"))
 ;; Keywords: convenience, package, tools
-;; License: CC0
+;; License: GPL-3.0-or-later
+
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+;;
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+;;
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 ;;; Commentary:
 
@@ -45,8 +58,8 @@
 ;;   (rapid-package magit
 ;;     "Git interface"
 ;;     :ensure t
-;;     :variable ((magit-save-repository-buffers \\='dontask
-;;                 "Save buffers without asking"))
+;;     :variable (magit-save-repository-buffers \\='dontask
+;;                "Save buffers without asking")
 ;;     :bind (("C-x g" . magit-status))
 ;;     :custom-face
 ;;     (magit-diff-added ((t (:foreground \"green\")))))
@@ -799,8 +812,8 @@ Example:
   (rapid-package magit
     \"Git interface\"
     :ensure t
-    :variable ((magit-save-repository-buffers \\='dontask
-                \"Save buffers without asking\"))
+    :variable (magit-save-repository-buffers \\='dontask
+               \"Save buffers without asking\")
     :bind ((\"C-x g\" . magit-status))
     :hook (magit-mode . magit-auto-revert-mode)
     :config
@@ -1848,15 +1861,12 @@ Anything else                             -> delegate to
     ;; List - convert to vector (check what kind of list it is)
     (let ((tl (rapid-package--tl-new)))
       (cond
-       ;; List of symbols -> convert each and create vector
-       ((and (cl-every #'symbolp value) (not (null value)))
+       ;; Atom list (all symbols and/or strings): path specs and simple lists.
+       ;; Covers symbol-only, string-only, and mixed (e.g. alist path specs).
+       ((cl-every (lambda (x) (or (symbolp x) (stringp x))) value)
         (dolist (item value)
           (rapid-package--tl-append! tl (rapid-package-json--normalize-lisp-value item))))
-       ;; List of strings -> convert each and create vector
-       ((and (cl-every #'stringp value) (not (null value)))
-        (dolist (item value)
-          (rapid-package--tl-append! tl (rapid-package-json--normalize-lisp-value item))))
-       ;; Body forms -> format with indentation
+       ;; Body forms (contain cons/list elements) -> format with indentation
        (t
         (dolist (item value)
           (rapid-package--tl-append! tl (rapid-package-json--format-form item)))))
