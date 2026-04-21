@@ -672,9 +672,10 @@ Map-local :bind (:map ...) alone does NOT trigger auto-defer."
 
       ;; :pin
       (when pin-archive
-        (rapid-package--codegen-bucket-append!
-         buckets :pin
-         `(add-to-list 'package-pinned-packages '(,pkg-name . ,pin-archive))))
+        (let ((pin-str (if (symbolp pin-archive) (symbol-name pin-archive) pin-archive)))
+          (rapid-package--codegen-bucket-append!
+           buckets :pin
+           `(add-to-list 'package-pinned-packages '(,pkg-name . ,pin-str)))))
 
       ;; :install
       (cond
