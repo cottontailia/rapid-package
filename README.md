@@ -98,6 +98,8 @@
 (rapid-package-after treesit-env
   "Use Zig on Windows"
   :when-system windows-nt
+  :env-path
+  ,(expand-file-name "~/AppData/Local/Microsoft/WinGet/Links")
   :custom
   (treesit-env-compiler-cc '("zig" "cc" "-O3"))
   (treesit-env-compiler-c++ '("zig" "c++" "-O3")))
