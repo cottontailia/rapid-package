@@ -54,6 +54,13 @@
   (tab-width 4 "Set default tab width to 4 columns")
   (indent-tabs-mode nil "Use spaces instead of tabs"))
 
+(rapid-package package
+  :custom
+  (package-archive-priorities (("gnu" . 10)
+                               ("nongnu" . 10)
+                               ("melpa" . 5)))
+  ((package-archives "melpa") "https://melpa.org/packages/"))
+
 ;; package settings
 (rapid-package vertico
   "Vertical interactive completion UI"
